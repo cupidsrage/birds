@@ -6,7 +6,8 @@ A private app for two — for couples who only get the weekends together. Node/E
 
 - **Countdown** to your next weekend together (auto-set to the upcoming Saturday, or pin your own).
 - **Love notes (timed dead drop)** — leave a note now or set it to unlock later in the week. Your partner can't read it until it unlocks; you always see your own.
-- **Question & dare deck** — draw a flirty card, answer it, and your partner sees the answer.
+- **Question & dare deck** — draw a card (AI-generated fresh on every draw, or from a built-in deck without a key). Answer with words, a photo, or both. Photos you send land privately in your partner's inbox.
+- **Inbox** — send each other photos and notes anytime. Private to the recipient: you see what you've sent and received; your partner only sees what was sent to them. Photos are resized and stripped of location metadata on upload, and served only to the two people on the message.
 - **The menu** — a private yes / maybe / no checklist. The app only reveals items you *both* said yes or maybe to (at the cooler of the two answers). Check a mutual match off as **done** and it clears from the list. A fresh set is generated every **Sunday night**.
 - **Wishlist** — a fresh set of date ideas every Sunday night; tap one off when you've done it.
 
@@ -27,7 +28,7 @@ NAME_A=Blake NAME_B=Robin PASS_A=secret1 PASS_B=secret2 SESSION_SECRET=anything 
 
 1. Push this folder to a GitHub repo.
 2. In Railway: **New Project → Deploy from GitHub repo**, pick the repo.
-3. Add a **Volume** and set its mount path to `/data` (this keeps the database across deploys).
+3. Add a **Volume** and set its mount path to `/data` (this keeps the database **and uploaded photos** across deploys).
 4. Under **Variables**, set:
 
    | Variable | What it is |

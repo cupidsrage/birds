@@ -196,3 +196,28 @@ button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
   color: var(--gold); margin-bottom: 10px;
 }
 .draw .q { font-family: var(--serif); font-size: 22px; line-height: 1.4; }
+
+/* ---- Inbox / photos ---- */
+.badge {
+  display: inline-grid; place-items: center;
+  min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px;
+  border-radius: 9px; background: var(--rose); color: var(--ink);
+  font-size: 11px; font-weight: 800; vertical-align: middle;
+}
+.photo-pick {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--ink-2); border: 1px dashed var(--line);
+  border-radius: 14px; padding: 13px 15px; cursor: pointer;
+  color: var(--muted); font-size: 14px;
+}
+.photo-pick:active { filter: brightness(1.1); }
+.inbox-tabs { display: flex; gap: 6px; margin: 14px 0 4px; }
+.itab {
+  flex: 1; background: transparent; color: var(--muted);
+  border: 1px solid var(--line); padding: 9px; border-radius: 12px; font-size: 14px;
+}
+.itab.on { background: var(--card); color: var(--text); }
+.inbox-photo {
+  display: block; width: 100%; border-radius: 12px; margin: 4px 0 4px;
+  border: 1px solid var(--line);
+}

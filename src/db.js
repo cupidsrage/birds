@@ -68,6 +68,18 @@ db.exec(`
     body TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+
+  -- Inbox: photos + notes sent from one person to the other (private to recipient)
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    body TEXT,                       -- optional caption / note
+    photo TEXT,                      -- filename in the photos dir, or NULL
+    prompt TEXT,                     -- set when this came from a deck dare
+    seen INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
 `);
 
 export default db;

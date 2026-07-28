@@ -1,6 +1,6 @@
 // Weekly content generation. Uses the Anthropic API when ANTHROPIC_API_KEY is
 // set; otherwise falls back to shuffling a built-in pool so the app always works.
-import { DESIRE_POOL, WISH_POOL } from "./content.js";
+import { DESIRE_POOL, WISH_POOL, DECK } from "./content.js";
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
@@ -61,5 +61,35 @@ export async function generateWishes(n = 6) {
   } catch (e) {
     console.error("wish generation failed, using pool:", e.message);
     return pick(WISH_POOL, n);
+  }
+}
+
+const DECK_PROMPT = `Generate ONE card for a flirty question-and-dare game between two adult partners in a long-distance relationship who only see each other on weekends. Randomly choose either a "question" (something intimate, romantic, or playful to answer) or a "dare" (a small flirty action, sometimes involving sending a photo or voice note). Keep it warm and tasteful rather than explicit, under 25 words. Return ONLY a JSON object like {"type":"question","text":"..."} or {"type":"dare","text":"..."} with no other text.`;
+
+export async function generateCard() {
+  if (!API_KEY) return DECK[Math.floor(Math.random() * DECK.length)];
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 256,
+        messages: [{ role: "user", content: DECK_PROMPT }],
+      }),
+    });
+    if (!res.ok) throw new Error(`Anthropic API ${res.status}`);
+    const data = await res.json();
+    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+    const card = JSON.parse(text.replace(/```json|```/g, "").trim());
+    if (!card || !card.text || !["question", "dare"].includes(card.type)) throw new Error("bad card shape");
+    return { type: card.type, text: String(card.text).trim() };
+  } catch (e) {
+    console.error("card generation failed, using pool:", e.message);
+    return DECK[Math.floor(Math.random() * DECK.length)];
   }
 }

@@ -1,16 +1,26 @@
 import express from "express";
 import cookieParser from "cookie-parser";
+import multer from "multer";
+import sharp from "sharp";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { mkdirSync } from "fs";
+import { readFile, unlink } from "fs/promises";
 import crypto from "crypto";
 import db from "./db.js";
 import { DECK } from "./content.js";
-import { generateMenu, generateWishes } from "./generate.js";
+import { generateMenu, generateWishes, generateCard } from "./generate.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
+
+// Photo storage lives alongside the DB, in the persistent volume.
+const dataDir = process.env.DATA_DIR || join(__dirname, "..", "data");
+const photosDir = join(dataDir, "photos");
+mkdirSync(photosDir, { recursive: true });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
 // ---- Config via env ----
 const NAME_A = process.env.NAME_A || "You";
@@ -202,12 +212,99 @@ app.post("/api/points", auth, (req, res) => {
 });
 
 // ---------- Deck ----------
-app.get("/api/deck/draw", auth, (req, res) => res.json(DECK[Math.floor(Math.random() * DECK.length)]));
+app.get("/api/deck/draw", auth, async (req, res) => {
+  const card = await generateCard();
+  res.json(card);
+});
 app.get("/api/deck/answers", auth, (req, res) => res.json(db.prepare(`SELECT * FROM answers ORDER BY created_at DESC LIMIT 50`).all()));
-app.post("/api/deck/answers", auth, (req, res) => {
-  const { prompt, body } = req.body || {};
-  if (!prompt || !body || !body.trim()) return res.status(400).json({ error: "Answer first." });
-  db.prepare(`INSERT INTO answers (person, prompt, body, created_at) VALUES (?,?,?,?)`).run(req.person, prompt, body.trim(), Date.now());
+
+// Answer a card. May include a photo (multipart) which is delivered to the
+// partner's inbox. Text answers are also logged to the shared answers feed.
+app.post("/api/deck/answers", auth, upload.single("photo"), async (req, res) => {
+  const prompt = req.body?.prompt;
+  const body = (req.body?.body || "").trim();
+  if (!prompt) return res.status(400).json({ error: "Missing prompt." });
+  if (!body && !req.file) return res.status(400).json({ error: "Add an answer or a photo." });
+
+  let filename = null;
+  if (req.file) {
+    filename = await savePhoto(req.file.buffer);
+  }
+
+  // Text answer goes to the shared feed (as before).
+  if (body) {
+    db.prepare(`INSERT INTO answers (person, prompt, body, created_at) VALUES (?,?,?,?)`)
+      .run(req.person, prompt, body, Date.now());
+  }
+  // Photo (and optional caption) is delivered privately to the partner.
+  if (filename) {
+    db.prepare(`INSERT INTO messages (sender, recipient, body, photo, prompt, seen, created_at) VALUES (?,?,?,?,?,0,?)`)
+      .run(req.person, req.partner, body || null, filename, prompt, Date.now());
+  }
+  res.json({ ok: true, sentPhoto: !!filename });
+});
+
+// ---------- Inbox ----------
+async function savePhoto(buffer) {
+  const name = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}.jpg`;
+  // Resize down to a sane max and re-encode as JPEG to cap size and strip EXIF.
+  await sharp(buffer)
+    .rotate() // respect orientation before stripping metadata
+    .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toFile(join(photosDir, name));
+  return name;
+}
+
+// Send a photo and/or note anytime (general inbox).
+app.post("/api/inbox", auth, upload.single("photo"), async (req, res) => {
+  const body = (req.body?.body || "").trim();
+  if (!body && !req.file) return res.status(400).json({ error: "Add a note or a photo." });
+  let filename = null;
+  if (req.file) filename = await savePhoto(req.file.buffer);
+  db.prepare(`INSERT INTO messages (sender, recipient, body, photo, prompt, seen, created_at) VALUES (?,?,?,?,?,0,?)`)
+    .run(req.person, req.partner, body || null, filename, null, Date.now());
+  res.json({ ok: true });
+});
+
+// The two tabs of the inbox: received (to me) and sent (from me).
+app.get("/api/inbox", auth, (req, res) => {
+  const received = db.prepare(`SELECT id, sender, recipient, body, photo, prompt, seen, created_at FROM messages WHERE recipient = ? ORDER BY created_at DESC`).all(req.person);
+  const sent = db.prepare(`SELECT id, sender, recipient, body, photo, prompt, seen, created_at FROM messages WHERE sender = ? ORDER BY created_at DESC`).all(req.person);
+  // Mark received as seen.
+  db.prepare(`UPDATE messages SET seen = 1 WHERE recipient = ? AND seen = 0`).run(req.person);
+  res.json({ received, sent });
+});
+
+// Unseen count for the inbox badge.
+app.get("/api/inbox/unseen", auth, (req, res) => {
+  const c = db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE recipient = ? AND seen = 0`).get(req.person).c;
+  res.json({ unseen: c });
+});
+
+// Serve a photo, but only to its sender or recipient.
+app.get("/api/photo/:name", auth, async (req, res) => {
+  const name = req.params.name;
+  const msg = db.prepare(`SELECT sender, recipient FROM messages WHERE photo = ?`).get(name);
+  if (!msg || (msg.sender !== req.person && msg.recipient !== req.person)) {
+    return res.status(404).end();
+  }
+  try {
+    const buf = await readFile(join(photosDir, name));
+    res.type("image/jpeg").send(buf);
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Delete a message you sent or received (also removes the photo file).
+app.delete("/api/inbox/:id", auth, async (req, res) => {
+  const msg = db.prepare(`SELECT id, sender, recipient, photo FROM messages WHERE id = ?`).get(req.params.id);
+  if (!msg || (msg.sender !== req.person && msg.recipient !== req.person)) {
+    return res.status(404).json({ error: "Not found." });
+  }
+  db.prepare(`DELETE FROM messages WHERE id = ?`).run(msg.id);
+  if (msg.photo) { try { await unlink(join(photosDir, msg.photo)); } catch {} }
   res.json({ ok: true });
 });
 

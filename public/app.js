@@ -5,6 +5,7 @@ let tab = "notes";
 const api = {
   async get(p) { const r = await fetch(p); if (!r.ok) throw await r.json().catch(() => ({})); return r.json(); },
   async post(p, b) { const r = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}) }); if (!r.ok) throw await r.json().catch(() => ({})); return r.json(); },
+  async form(p, fd) { const r = await fetch(p, { method: "POST", body: fd }); if (!r.ok) throw await r.json().catch(() => ({})); return r.json(); },
   async del(p) { const r = await fetch(p, { method: "DELETE" }); return r.json(); },
 };
 
@@ -60,6 +61,7 @@ function renderLogin() {
 const TABS = [
   ["notes", "Love notes"],
   ["deck", "Deck"],
+  ["inbox", "Inbox"],
   ["desires", "The menu"],
   ["wishes", "Wishlist"],
   ["points", "Points"],
@@ -78,13 +80,24 @@ function renderApp() {
         </div>
       </div>
       <div class="tabs">
-        ${TABS.map(([k, l]) => `<button class="tab ${k === tab ? "on" : ""}" data-tab="${k}">${l}</button>`).join("")}
+        ${TABS.map(([k, l]) => `<button class="tab ${k === tab ? "on" : ""}" data-tab="${k}">${l}${k === "inbox" ? `<span class="badge" id="inboxbadge" hidden></span>` : ""}</button>`).join("")}
       </div>
       <div class="panel" id="panel"></div>
     </div>`;
   document.getElementById("logout").onclick = async () => { await api.post("/api/logout"); location.reload(); };
   document.querySelectorAll(".tab").forEach((b) => b.onclick = () => { tab = b.dataset.tab; renderApp(); });
+  refreshBadge();
   renderPanel();
+}
+
+async function refreshBadge() {
+  try {
+    const { unseen } = await api.get("/api/inbox/unseen");
+    const el = document.getElementById("inboxbadge");
+    if (!el) return;
+    if (unseen > 0) { el.textContent = unseen; el.hidden = false; }
+    else el.hidden = true;
+  } catch {}
 }
 
 async function renderPanel() {
@@ -93,6 +106,7 @@ async function renderPanel() {
   try {
     if (tab === "notes") return renderNotes(p);
     if (tab === "deck") return renderDeck(p);
+    if (tab === "inbox") return renderInbox(p);
     if (tab === "desires") return renderDesires(p);
     if (tab === "wishes") return renderWishes(p);
     if (tab === "points") return renderPoints(p);
@@ -144,7 +158,7 @@ async function renderDeck(p) {
   p.innerHTML = `
     <div class="card">
       <h2>Draw a card</h2>
-      <p class="sub">A question or a dare. Answer it, and ${h(me.partner)} sees it too.</p>
+      <p class="sub">A fresh question or dare each time. Answer with words, a photo, or both — photos go straight to ${h(me.partner)}'s inbox.</p>
       <div class="draw" id="draw"><div class="q">Tap to draw</div></div>
       <div style="height:12px"></div>
       <div class="row"><button id="drawbtn" style="flex:1">Draw a card</button></div>
@@ -159,20 +173,109 @@ async function renderDeck(p) {
     : `<div class="empty">No answers yet.</div>`;
 }
 async function drawCard() {
+  const draw = document.getElementById("draw");
+  draw.innerHTML = `<div class="q">Drawing…</div>`;
   currentCard = await api.get("/api/deck/draw");
-  document.getElementById("draw").innerHTML =
-    `<div><div class="kind">${currentCard.type}</div><div class="q">${h(currentCard.text)}</div></div>`;
+  draw.innerHTML = `<div><div class="kind">${currentCard.type}</div><div class="q">${h(currentCard.text)}</div></div>`;
   document.getElementById("answerbox").innerHTML = `
     <textarea id="ab" placeholder="Your answer…"></textarea>
     <div style="height:8px"></div>
+    <label class="photo-pick" id="ablabel">
+      📷 <span id="abname">Add a photo (optional)</span>
+      <input id="af" type="file" accept="image/*" hidden />
+    </label>
+    <div style="height:8px"></div>
     <button id="asend" style="width:100%">Share answer</button>
     <div class="err" id="aerr"></div>`;
-  document.getElementById("asend").onclick = async () => {
-    try {
-      await api.post("/api/deck/answers", { prompt: currentCard.text, body: document.getElementById("ab").value });
-      renderPanel();
-    } catch (e) { document.getElementById("aerr").textContent = e.error || "Couldn't share."; }
+  const fileInput = document.getElementById("af");
+  fileInput.onchange = () => {
+    document.getElementById("abname").textContent = fileInput.files[0] ? fileInput.files[0].name : "Add a photo (optional)";
   };
+  document.getElementById("asend").onclick = async () => {
+    const btn = document.getElementById("asend");
+    btn.disabled = true; btn.textContent = "Sending…";
+    try {
+      const fd = new FormData();
+      fd.append("prompt", currentCard.text);
+      fd.append("body", document.getElementById("ab").value);
+      if (fileInput.files[0]) fd.append("photo", fileInput.files[0]);
+      await api.form("/api/deck/answers", fd);
+      renderPanel();
+    } catch (e) {
+      document.getElementById("aerr").textContent = e.error || "Couldn't share.";
+      btn.disabled = false; btn.textContent = "Share answer";
+    }
+  };
+}
+
+/* ---------------- Inbox ---------------- */
+async function renderInbox(p) {
+  const { received, sent } = await api.get("/api/inbox");
+  refreshBadge();
+  p.innerHTML = `
+    <div class="card">
+      <h2>Send ${h(me.partner)} something</h2>
+      <p class="sub">A photo, a note, or both. Only ${h(me.partner)} will see it.</p>
+      <textarea id="ib" placeholder="Say something…"></textarea>
+      <div style="height:8px"></div>
+      <label class="photo-pick" id="iblabel">
+        📷 <span id="ibname">Attach a photo</span>
+        <input id="if" type="file" accept="image/*" hidden />
+      </label>
+      <div style="height:8px"></div>
+      <button id="isend" style="width:100%">Send</button>
+      <div class="err" id="ierr"></div>
+    </div>
+    <div class="inbox-tabs">
+      <button class="itab on" data-box="received">Received</button>
+      <button class="itab" data-box="sent">Sent</button>
+    </div>
+    <div id="ilist"></div>`;
+
+  const fileInput = document.getElementById("if");
+  fileInput.onchange = () => {
+    document.getElementById("ibname").textContent = fileInput.files[0] ? fileInput.files[0].name : "Attach a photo";
+  };
+  document.getElementById("isend").onclick = async () => {
+    const btn = document.getElementById("isend");
+    btn.disabled = true; btn.textContent = "Sending…";
+    try {
+      const fd = new FormData();
+      fd.append("body", document.getElementById("ib").value);
+      if (fileInput.files[0]) fd.append("photo", fileInput.files[0]);
+      await api.form("/api/inbox", fd);
+      renderPanel();
+    } catch (e) {
+      document.getElementById("ierr").textContent = e.error || "Couldn't send.";
+      btn.disabled = false; btn.textContent = "Send";
+    }
+  };
+
+  const boxes = { received, sent };
+  const draw = (which) => {
+    const msgs = boxes[which];
+    const list = document.getElementById("ilist");
+    if (!msgs.length) { list.innerHTML = `<div class="empty">${which === "received" ? "Nothing yet." : "You haven't sent anything yet."}</div>`; return; }
+    list.innerHTML = msgs.map((m) => {
+      const who = which === "received" ? `From ${h(m.sender)}` : `To ${h(m.recipient)}`;
+      const when = new Date(m.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const tag = m.prompt ? `<div class="meta">↳ dare: ${h(m.prompt)}</div>` : "";
+      const photo = m.photo ? `<img class="inbox-photo" src="/api/photo/${encodeURIComponent(m.photo)}" alt="photo" loading="lazy" />` : "";
+      const body = m.body ? `<div class="body">${h(m.body)}</div>` : "";
+      return `<div class="item">
+        <div class="who">${who} · ${h(when)}</div>
+        ${photo}${body}${tag}
+        <div style="margin-top:8px"><button class="small ghost" data-del="${m.id}">delete</button></div>
+      </div>`;
+    }).join("");
+    list.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await api.del(`/api/inbox/${b.dataset.del}`); renderPanel(); });
+  };
+  draw("received");
+  p.querySelectorAll(".itab").forEach((b) => b.onclick = () => {
+    p.querySelectorAll(".itab").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    draw(b.dataset.box);
+  });
 }
 
 /* ---------------- Desire menu ---------------- */
