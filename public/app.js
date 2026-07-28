@@ -377,18 +377,18 @@ async function renderPoints(p) {
   p.innerHTML = `
     <div class="card">
       <h2>Points</h2>
-      <p class="sub">Earn points for the little things. Cash them in this weekend.</p>
+      <p class="sub">Give ${h(me.partner)} points for the little things they do. Cash them in this weekend.</p>
       <div class="score">
         <div class="p"><div class="n">${d.me.total}</div><div class="who">${h(d.me.name)} (you)</div></div>
         <div class="p"><div class="n">${d.partner.total}</div><div class="who">${h(d.partner.name)}</div></div>
       </div>
       <div style="height:14px"></div>
       <div class="row">
-        <input id="pr" placeholder="For what? (good-morning text…)" />
+        <input id="pr" placeholder="What did ${h(me.partner)} do? (good-morning text…)" />
         <input id="pd" type="number" value="1" style="max-width:74px" />
       </div>
       <div style="height:8px"></div>
-      <button id="padd" style="width:100%">Add to your score</button>
+      <button id="padd" style="width:100%">Give ${h(me.partner)} points</button>
       <div class="err" id="perr"></div>
     </div>
     <div id="plist"></div>`;
@@ -399,9 +399,13 @@ async function renderPoints(p) {
     } catch (e) { document.getElementById("perr").textContent = e.error || "Couldn't add."; }
   };
   const list = document.getElementById("plist");
-  list.innerHTML = d.log.length ? d.log.map((l) => `
-    <div class="item"><div class="who">${h(l.person)} · ${l.delta > 0 ? "+" : ""}${l.delta}</div><div class="body">${h(l.reason)}</div></div>
-  `).join("") : `<div class="empty">No points logged yet.</div>`;
+  list.innerHTML = d.log.length ? d.log.map((l) => {
+    // fromMe true = you gave it to partner; false = partner gave it to you; null = legacy row
+    const label = l.fromMe === true ? `You → ${h(l.person)}`
+      : l.fromMe === false ? `${h(l.giver)} → you`
+      : `${h(l.person)}`;
+    return `<div class="item"><div class="who">${label} · ${l.delta > 0 ? "+" : ""}${l.delta}</div><div class="body">${h(l.reason)}</div></div>`;
+  }).join("") : `<div class="empty">No points given yet.</div>`;
 }
 
 if ("serviceWorker" in navigator) {

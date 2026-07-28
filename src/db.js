@@ -55,6 +55,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS points (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     person TEXT NOT NULL,
+    giver TEXT,
     delta INTEGER NOT NULL,
     reason TEXT NOT NULL,
     created_at INTEGER NOT NULL
@@ -119,6 +120,19 @@ ensureColumns("menu_items", ["week", "body", "done"], `
     done INTEGER NOT NULL DEFAULT 0
   );
 `);
+
+// Add a column to a table without dropping it (preserves existing rows).
+function addColumnIfMissing(table, column, definition) {
+  if (!columns(table).includes(column)) {
+    console.log(`Migrating '${table}' — adding column '${column}'.`);
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+  }
+}
+
+// Points used to be self-assigned (person = giver). Now points are a gift to the
+// partner, credited from the giver. Old rows keep their history; we just add the
+// giver column so new gifts can record who sent them.
+addColumnIfMissing("points", "giver", "TEXT");
 
 // If we rebuilt an item table, force a regenerate by clearing the week flag so
 // ensureWeek() repopulates on the next request.

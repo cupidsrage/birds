@@ -222,17 +222,24 @@ app.post("/api/desires/:id/done", auth, (req, res) => {
 app.get("/api/points", auth, (req, res) => {
   const totals = db.prepare(`SELECT person, COALESCE(SUM(delta),0) AS total FROM points GROUP BY person`).all();
   const map = Object.fromEntries(totals.map((t) => [t.person, t.total]));
+  const log = db.prepare(`SELECT * FROM points ORDER BY created_at DESC LIMIT 30`).all().map((p) => ({
+    ...p,
+    // Who gave it, for display. Older rows may not have a giver recorded.
+    fromMe: p.giver ? p.giver === req.person : null,
+  }));
   res.json({
     me: { name: req.person, total: map[req.person] || 0 },
     partner: { name: req.partner, total: map[req.partner] || 0 },
-    log: db.prepare(`SELECT * FROM points ORDER BY created_at DESC LIMIT 30`).all(),
+    log,
   });
 });
 app.post("/api/points", auth, (req, res) => {
   const { delta, reason } = req.body || {};
   const n = parseInt(delta, 10);
   if (!Number.isFinite(n) || !reason || !reason.trim()) return res.status(400).json({ error: "Need a reason and an amount." });
-  db.prepare(`INSERT INTO points (person, delta, reason, created_at) VALUES (?,?,?,?)`).run(req.person, n, reason.trim(), Date.now());
+  // Points are a gift: they go to your partner, credited from you.
+  db.prepare(`INSERT INTO points (person, giver, delta, reason, created_at) VALUES (?,?,?,?,?)`)
+    .run(req.partner, req.person, n, reason.trim(), Date.now());
   res.json({ ok: true });
 });
 
