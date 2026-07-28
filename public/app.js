@@ -279,8 +279,19 @@ async function renderInbox(p) {
 }
 
 /* ---------------- Desire menu ---------------- */
-async function renderDesires(p) {
+async function renderDesires(p, retried) {
   const d = await api.get("/api/desires");
+  // A first load right after a new week can land before generation finishes.
+  if (!d.items.length && !retried) {
+    p.innerHTML = `
+      <div class="card">
+        <h2>This week's menu</h2>
+        <p class="sub">Fresh every Sunday night.</p>
+        <div class="empty">Putting this week's menu together…</div>
+      </div>`;
+    await new Promise((r) => setTimeout(r, 1500));
+    return renderDesires(p, true);
+  }
   const matchHtml = d.matches.length
     ? d.matches.map((m) => `
         <div class="match">
@@ -324,8 +335,20 @@ async function renderDesires(p) {
 }
 
 /* ---------------- Wishlist ---------------- */
-async function renderWishes(p) {
-  const wishes = await api.get("/api/wishes");
+async function renderWishes(p, retried) {
+  let wishes = await api.get("/api/wishes");
+  // A first load right after a new week can land before generation finishes.
+  // Retry once after a short pause before showing an empty state.
+  if (!wishes.length && !retried) {
+    p.innerHTML = `
+      <div class="card">
+        <h2>This week's wishlist</h2>
+        <p class="sub">A fresh set of date ideas every Sunday night. Tap one off when you've done it together.</p>
+        <div class="empty">Putting this week's list together…</div>
+      </div>`;
+    await new Promise((r) => setTimeout(r, 1500));
+    return renderWishes(p, true);
+  }
   p.innerHTML = `
     <div class="card">
       <h2>This week's wishlist</h2>
@@ -333,13 +356,18 @@ async function renderWishes(p) {
       <div id="wlist"></div>
     </div>`;
   const list = document.getElementById("wlist");
-  list.innerHTML = wishes.length ? wishes.map((w) => `
+  if (!wishes.length) {
+    list.innerHTML = `<div class="empty">Couldn't load this week's list.<br><button class="small" id="wretry" style="margin-top:10px">Try again</button></div>`;
+    document.getElementById("wretry").onclick = () => renderPanel();
+    return;
+  }
+  list.innerHTML = wishes.map((w) => `
     <div class="item">
       <div style="display:flex;align-items:center;gap:10px;justify-content:space-between">
         <div class="body ${w.done ? "done" : ""}" style="flex:1">${h(w.body)}</div>
         <button class="small ${w.done ? "ghost" : ""}" data-toggle="${w.id}">${w.done ? "undo" : "done"}</button>
       </div>
-    </div>`).join("") : `<div class="empty">This week's list is being prepared…</div>`;
+    </div>`).join("");
   list.querySelectorAll("[data-toggle]").forEach((b) => b.onclick = async () => { await api.post(`/api/wishes/${b.dataset.toggle}/toggle`); renderPanel(); });
 }
 
