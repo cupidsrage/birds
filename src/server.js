@@ -64,12 +64,18 @@ let weekRefresh = null; // in-flight refresh promise, shared across requests
 async function ensureWeek() {
   const week = currentWeekKey();
   const stored = getMeta.get("current_week")?.value;
-  if (stored === week) return week;
 
-  // If a refresh for this week is already running, wait on that one instead of
-  // kicking off a second generation call per concurrent request.
+  // Normally: if this week is already generated, we're done. But guard against a
+  // previously-saved empty week (e.g. from an earlier broken run) — if the menu
+  // or wishlist somehow ended up empty, regenerate instead of trusting the flag.
+  if (stored === week) {
+    const menuCount = db.prepare("SELECT COUNT(*) AS c FROM menu_items").get().c;
+    const wishCount = db.prepare("SELECT COUNT(*) AS c FROM wishes").get().c;
+    if (menuCount > 0 && wishCount > 0) return week;
+    console.log(`Week ${week} is stored but empty (menu=${menuCount}, wish=${wishCount}) — regenerating`);
+  }
+
   if (weekRefresh) return weekRefresh;
-
   weekRefresh = doRefresh(week).finally(() => { weekRefresh = null; });
   return weekRefresh;
 }
@@ -78,9 +84,14 @@ async function doRefresh(week) {
   console.log(`Refreshing content for week ${week}`);
   const [menu, wishes] = await Promise.all([generateMenu(8), generateWishes(6)]);
 
+  // Never wipe the current content or mark the week done unless we actually have
+  // fresh items to put in their place. This prevents an empty menu/wishlist.
+  if (!menu.length || !wishes.length) {
+    console.error(`Refresh produced empty content (menu=${menu.length}, wish=${wishes.length}) — keeping existing content`);
+    return week;
+  }
+
   const tx = db.transaction(() => {
-    // Fresh sets replace the old ones. Old weeks' rows are removed so the
-    // menu/wishlist show only this week. (Answers cascade away with items.)
     db.prepare("DELETE FROM menu_answers").run();
     db.prepare("DELETE FROM menu_items").run();
     db.prepare("DELETE FROM wishes").run();
@@ -167,10 +178,12 @@ app.post("/api/wishes/:id/toggle", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Desire menu (weekly, both-want -> done -> cleared) ----------
+// ---------- Desire menu (weekly, both-want -> done clears from matches) ----------
 app.get("/api/desires", auth, async (req, res) => {
   try { await ensureWeek(); } catch (e) { console.error("ensureWeek (desires):", e.message); }
-  const items = db.prepare(`SELECT id, body, done FROM menu_items WHERE done = 0 ORDER BY id`).all();
+  // All of this week's items stay answerable. `done` only affects whether a
+  // mutual match shows in the "You both want" section, not the answer list.
+  const items = db.prepare(`SELECT id, body, done FROM menu_items ORDER BY id`).all();
   const rank = { yes: 2, maybe: 1, no: 0 };
   const out = [];
   const matches = [];
@@ -179,8 +192,9 @@ app.get("/api/desires", auth, async (req, res) => {
     const mine = db.prepare(`SELECT answer FROM menu_answers WHERE item_id = ? AND person = ?`).get(it.id, req.person);
     const theirs = db.prepare(`SELECT answer FROM menu_answers WHERE item_id = ? AND person = ?`).get(it.id, req.partner);
     if (theirs) partnerAnswered++;
-    out.push({ id: it.id, item: it.body, myAnswer: mine ? mine.answer : null });
-    if (mine && theirs && mine.answer !== "no" && theirs.answer !== "no") {
+    out.push({ id: it.id, item: it.body, myAnswer: mine ? mine.answer : null, done: !!it.done });
+    // A mutual match shows in "You both want" only until it's checked off (done).
+    if (!it.done && mine && theirs && mine.answer !== "no" && theirs.answer !== "no") {
       const level = rank[mine.answer] <= rank[theirs.answer] ? mine.answer : theirs.answer;
       matches.push({ id: it.id, item: it.body, level });
     }
@@ -192,15 +206,15 @@ app.get("/api/desires", auth, async (req, res) => {
 app.post("/api/desires", auth, (req, res) => {
   const { id, answer } = req.body || {};
   if (!["yes", "maybe", "no"].includes(answer)) return res.status(400).json({ error: "Invalid answer." });
-  const item = db.prepare(`SELECT id FROM menu_items WHERE id = ? AND done = 0`).get(id);
+  const item = db.prepare(`SELECT id FROM menu_items WHERE id = ?`).get(id);
   if (!item) return res.status(404).json({ error: "Item not found." });
   db.prepare(`INSERT INTO menu_answers (item_id, person, answer) VALUES (?,?,?) ON CONFLICT(item_id, person) DO UPDATE SET answer = excluded.answer`).run(id, req.person, answer);
   res.json({ ok: true });
 });
 
-// Check off a mutual match as done -> it's removed from the list.
+// Check a mutual match off (or back on) — clears it from "You both want".
 app.post("/api/desires/:id/done", auth, (req, res) => {
-  db.prepare(`UPDATE menu_items SET done = 1 WHERE id = ?`).run(req.params.id);
+  db.prepare(`UPDATE menu_items SET done = 1 - done WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
 });
 

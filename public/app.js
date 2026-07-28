@@ -295,8 +295,8 @@ async function renderDesires(p) {
       <p class="sub">Fresh every Sunday night. Answer privately — only the things you <em>both</em> say yes or maybe to are revealed below.</p>
       <div id="menu">
         ${d.items.map((it) => `
-          <div class="desire">
-            <div class="t">${h(it.item)}</div>
+          <div class="desire ${it.done ? "done-item" : ""}">
+            <div class="t">${h(it.item)}${it.done ? ` <span class="done-tag">✓ done</span>` : ""}</div>
             <div class="choices" data-id="${it.id}">
               ${["yes", "maybe", "no"].map((c) =>
                 `<button class="choice ${c} ${it.myAnswer === c ? "on" : ""}" data-c="${c}">${c}</button>`).join("")}
