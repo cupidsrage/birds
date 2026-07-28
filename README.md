@@ -40,6 +40,10 @@ NAME_A=Blake NAME_B=Robin PASS_A=secret1 PASS_B=secret2 SESSION_SECRET=anything 
 5. Railway sets `PORT` automatically. Deploy — you'll get a public URL.
 6. Open the URL on your phones and **Add to Home Screen** to install it as an app.
 
+## Node version
+
+This project pins Node 22 (via `.nvmrc` and the `engines` field) because `better-sqlite3` ships prebuilt binaries for LTS versions. If the build environment uses a non-LTS Node (e.g. 24), it falls back to compiling from source and fails without a C toolchain. Railway's Nixpacks builder reads `.nvmrc`, so leave it in place.
+
 ## Making it yours
 
 - Edit the desire menu and the question/dare deck in `src/content.js` — just change the arrays.
