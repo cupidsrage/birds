@@ -82,4 +82,54 @@ db.exec(`
   );
 `);
 
+// ---- Migrations ----
+// Earlier versions of this app created `wishes` and `menu_items` with a
+// different set of columns. `CREATE TABLE IF NOT EXISTS` above does nothing when
+// the table already exists, so on a volume carried over from an older deploy the
+// stale shape survives — and inserts using the new columns then fail every time,
+// which shows up as a permanently empty menu/wishlist. Detect a missing expected
+// column and rebuild the table (its rows are regenerated weekly anyway).
+function columns(table) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+}
+function ensureColumns(table, required, createSql) {
+  const cols = columns(table);
+  const missing = required.filter((c) => !cols.includes(c));
+  if (missing.length) {
+    console.log(`Migrating '${table}' — missing columns: ${missing.join(", ")}. Rebuilding.`);
+    db.exec(`DROP TABLE IF EXISTS ${table};`);
+    db.exec(createSql);
+  }
+}
+
+ensureColumns("wishes", ["week", "body", "done"], `
+  CREATE TABLE wishes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week TEXT NOT NULL,
+    body TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0
+  );
+`);
+
+ensureColumns("menu_items", ["week", "body", "done"], `
+  CREATE TABLE menu_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week TEXT NOT NULL,
+    body TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0
+  );
+`);
+
+// If we rebuilt an item table, force a regenerate by clearing the week flag so
+// ensureWeek() repopulates on the next request.
+const wishCols = columns("wishes");
+const menuCols = columns("menu_items");
+if (wishCols.includes("week") && menuCols.includes("week")) {
+  const wc = db.prepare("SELECT COUNT(*) AS c FROM wishes").get().c;
+  const mc = db.prepare("SELECT COUNT(*) AS c FROM menu_items").get().c;
+  if (wc === 0 || mc === 0) {
+    db.prepare("DELETE FROM meta WHERE key = 'current_week'").run();
+  }
+}
+
 export default db;
