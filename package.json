@@ -1,0 +1,18 @@
+{
+  "name": "weekend",
+  "version": "1.0.0",
+  "description": "A private app for two — countdown, notes, question decks, wishlists, and a desire menu",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
