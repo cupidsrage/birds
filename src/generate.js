@@ -1,6 +1,7 @@
 // Weekly content generation. Uses the Anthropic API when ANTHROPIC_API_KEY is
 // set; otherwise falls back to shuffling a built-in pool so the app always works.
 import { DESIRE_POOL, WISH_POOL, DECK } from "./content.js";
+import crypto from "crypto";
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
@@ -77,10 +78,56 @@ export async function generateWishes(n = 6) {
   }
 }
 
-const DECK_PROMPT = `Generate ONE card for a flirty question-and-dare game between two adult partners in a long-distance relationship who only see each other on weekends. Randomly choose either a "question" (something intimate, romantic, or playful to answer) or a "dare" (a small flirty action, sometimes involving sending a photo or voice note). Keep it warm and tasteful rather than explicit, under 25 words. Return ONLY a JSON object like {"type":"question","text":"..."} or {"type":"dare","text":"..."} with no other text.`;
+// Rotating themes and formats injected per-draw so the model doesn't converge
+// on the same handful of cards every time.
+const CARD_THEMES = [
+  "a favorite memory of each other",
+  "something you find attractive about the other",
+  "a shared dream or future plan",
+  "a playful confession",
+  "physical touch and closeness",
+  "flirty teasing",
+  "something you miss during the week apart",
+  "a fantasy or wish for the weekend",
+  "gratitude and appreciation",
+  "a silly or funny 'would you rather'",
+  "first impressions and how you met",
+  "a small romantic gesture to do together",
+  "what makes you feel wanted",
+  "a compliment you've never said out loud",
+  "an adventure you'd take together",
+];
+const CARD_FORMATS = [
+  "a question to answer in words",
+  "a dare to send a photo",
+  "a would-you-rather with two options",
+  "a fill-in-the-blank sentence to complete",
+  "a this-or-that quick choice",
+  "a dare to describe something in detail",
+  "a question about the past",
+  "a question about the future",
+];
+
+function randOf(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 export async function generateCard() {
   if (!API_KEY) return DECK[Math.floor(Math.random() * DECK.length)];
+
+  const theme = randOf(CARD_THEMES);
+  const format = randOf(CARD_FORMATS);
+  const wantDare = Math.random() < 0.4; // ~40% dares, 60% questions
+  const seed = crypto.randomBytes(3).toString("hex");
+
+  const prompt = `You are generating ONE card for a flirty game between two adult partners in a long-distance relationship who only see each other on weekends.
+
+This card should be ${wantDare ? "a DARE" : "a QUESTION"}, themed loosely around: ${theme}.
+Format it as: ${format}.
+Make it fresh and specific — avoid clichés like "record a voice note" or "what are you most looking forward to." Vary your wording and ideas widely from card to card. Keep it warm and tasteful rather than explicit, under 25 words.
+
+(Variety seed: ${seed} — use this to ensure this card differs from any you'd typically produce.)
+
+Return ONLY a JSON object like {"type":"${wantDare ? "dare" : "question"}","text":"..."} with no other text.`;
+
   try {
     const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -92,7 +139,8 @@ export async function generateCard() {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 256,
-        messages: [{ role: "user", content: DECK_PROMPT }],
+        temperature: 1,
+        messages: [{ role: "user", content: prompt }],
       }),
     });
     if (!res.ok) throw new Error(`Anthropic API ${res.status}`);
