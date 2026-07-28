@@ -14,8 +14,21 @@ function pick(pool, n) {
   return copy.slice(0, n);
 }
 
+// Fetch with a hard timeout so a slow or blocked API call can never hang the
+// app — it aborts and we fall back to the built-in pool instead.
+const TIMEOUT_MS = 15000;
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function askClaude(prompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -69,7 +82,7 @@ const DECK_PROMPT = `Generate ONE card for a flirty question-and-dare game betwe
 export async function generateCard() {
   if (!API_KEY) return DECK[Math.floor(Math.random() * DECK.length)];
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

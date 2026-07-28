@@ -59,12 +59,23 @@ function currentWeekKey(now = new Date()) {
 const getMeta = db.prepare("SELECT value FROM meta WHERE key = ?");
 const setMeta = db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
 
+let weekRefresh = null; // in-flight refresh promise, shared across requests
+
 async function ensureWeek() {
   const week = currentWeekKey();
   const stored = getMeta.get("current_week")?.value;
   if (stored === week) return week;
 
-  console.log(`Refreshing content for week ${week} (was ${stored || "none"})`);
+  // If a refresh for this week is already running, wait on that one instead of
+  // kicking off a second generation call per concurrent request.
+  if (weekRefresh) return weekRefresh;
+
+  weekRefresh = doRefresh(week).finally(() => { weekRefresh = null; });
+  return weekRefresh;
+}
+
+async function doRefresh(week) {
+  console.log(`Refreshing content for week ${week}`);
   const [menu, wishes] = await Promise.all([generateMenu(8), generateWishes(6)]);
 
   const tx = db.transaction(() => {
@@ -148,7 +159,7 @@ app.post("/api/notes", auth, (req, res) => {
 
 // ---------- Wishlist (weekly) ----------
 app.get("/api/wishes", auth, async (req, res) => {
-  await ensureWeek();
+  try { await ensureWeek(); } catch (e) { console.error("ensureWeek (wishes):", e.message); }
   res.json(db.prepare(`SELECT id, body, done FROM wishes ORDER BY done, id`).all());
 });
 app.post("/api/wishes/:id/toggle", auth, (req, res) => {
@@ -158,7 +169,7 @@ app.post("/api/wishes/:id/toggle", auth, (req, res) => {
 
 // ---------- Desire menu (weekly, both-want -> done -> cleared) ----------
 app.get("/api/desires", auth, async (req, res) => {
-  await ensureWeek();
+  try { await ensureWeek(); } catch (e) { console.error("ensureWeek (desires):", e.message); }
   const items = db.prepare(`SELECT id, body, done FROM menu_items WHERE done = 0 ORDER BY id`).all();
   const rank = { yes: 2, maybe: 1, no: 0 };
   const out = [];
