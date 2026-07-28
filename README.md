@@ -7,8 +7,12 @@ A private app for two — for couples who only get the weekends together. Node/E
 - **Countdown** to your next weekend together (auto-set to the upcoming Saturday, or pin your own).
 - **Love notes (timed dead drop)** — leave a note now or set it to unlock later in the week. Your partner can't read it until it unlocks; you always see your own.
 - **Question & dare deck** — draw a flirty card, answer it, and your partner sees the answer.
-- **The menu** — a private yes / maybe / no checklist. The app only reveals the items you *both* said yes or maybe to (revealed at the cooler of the two answers).
-- **Wishlist** — a shared list of things to do together.
+- **The menu** — a private yes / maybe / no checklist. The app only reveals items you *both* said yes or maybe to (at the cooler of the two answers). Check a mutual match off as **done** and it clears from the list. A fresh set is generated every **Sunday night**.
+- **Wishlist** — a fresh set of date ideas every Sunday night; tap one off when you've done it.
+
+### Weekly refresh & AI
+
+Every Sunday at 8pm (server local time) the menu and wishlist swap in a brand-new random set. If you set `ANTHROPIC_API_KEY`, those items are generated fresh for you by Claude each week; without a key, the app draws from a built-in pool so it still works. The refresh runs in-process (checked on startup and hourly) — no external cron needed.
 - **Points** — log little things during the week, tally them up, cash them in.
 
 ## Run locally
@@ -35,6 +39,9 @@ NAME_A=Blake NAME_B=Robin PASS_A=secret1 PASS_B=secret2 SESSION_SECRET=anything 
    | `SESSION_SECRET` | Any long random string |
    | `DATA_DIR` | `/data` (matches your volume mount) |
    | `COUNTDOWN_TARGET` | *(optional)* ISO datetime of your next weekend, e.g. `2026-08-01T18:00:00Z` |
+   | `ANTHROPIC_API_KEY` | *(optional)* enables AI-generated weekly items. Get one at console.anthropic.com. Without it, a built-in pool is used. |
+   | `ANTHROPIC_MODEL` | *(optional)* defaults to `claude-sonnet-4-6` |
+   | `TZ` | *(recommended)* your timezone so "Sunday 8pm" is local, not UTC — e.g. `America/Chicago` |
    | `NODE_ENV` | `production` |
 
 5. Railway sets `PORT` automatically. Deploy — you'll get a public URL.

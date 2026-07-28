@@ -1,7 +1,7 @@
-// The desire menu. Each person answers yes / maybe / no privately,
-// and the app only reveals items where you BOTH said yes or maybe.
-// Edit this list freely to fit the two of you.
-export const DESIRE_ITEMS = [
+// Fallback pools, used when ANTHROPIC_API_KEY is not set (or generation fails).
+// When a key IS set, fresh items are generated each week instead.
+
+export const DESIRE_POOL = [
   "Long slow morning in bed with no plans",
   "Give each other massages",
   "Take a bath or shower together",
@@ -10,17 +10,39 @@ export const DESIRE_ITEMS = [
   "Send each other a photo during the week",
   "A slow dance in the kitchen",
   "Read something out loud to each other",
-  "Roleplay / pretend we just met",
+  "Roleplay — pretend we just met",
   "Make out like teenagers on the couch",
   "Try a new toy together",
   "One person is fully in charge for the night",
   "Leave love notes hidden around the place",
   "Cook something together undressed",
   "A weekend with phones in a drawer",
+  "Feed each other dessert in bed",
+  "Write down a fantasy and swap",
+  "Slow undressing, no rushing",
+  "Trade shoulder rubs by candlelight",
+  "Whisper what you missed all week",
 ];
 
-// Flirty / spicy question & dare deck.
-// type: "question" or "dare"
+export const WISH_POOL = [
+  "Cook a new recipe together",
+  "Sunday morning farmers market",
+  "Build a blanket fort and watch movies",
+  "Go for a long drive with no destination",
+  "Try a new coffee shop",
+  "Cook breakfast in bed for each other",
+  "Take a walk somewhere green",
+  "Do a puzzle over wine",
+  "Picnic in the park",
+  "Stargaze from the backyard",
+  "Redecorate one corner of the place together",
+  "Play a board game, loser owes a favor",
+  "Bake something from scratch",
+  "Visit somewhere neither of you has been",
+  "Have a no-screens dinner by candlelight",
+];
+
+// Flirty / spicy question & dare deck (this stays fixed).
 export const DECK = [
   { type: "question", text: "What's the first thing you noticed about me?" },
   { type: "question", text: "What's a fantasy you've never told me?" },

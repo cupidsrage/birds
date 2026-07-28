@@ -5,7 +5,6 @@ import { mkdirSync } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// On Railway, mount a volume at /data for persistence. Falls back to local file.
 const dataDir = process.env.DATA_DIR || join(__dirname, "..", "data");
 mkdirSync(dataDir, { recursive: true });
 
@@ -27,22 +26,29 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
 
-  -- Wishlist / mood board items
+  -- Wishlist items for the current week (regenerated each Sunday night)
   CREATE TABLE IF NOT EXISTS wishes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    author TEXT NOT NULL,
+    week TEXT NOT NULL,
     body TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL
+    done INTEGER NOT NULL DEFAULT 0
   );
 
-  -- Desire menu: each row is one person's answer to one item
-  CREATE TABLE IF NOT EXISTS desires (
+  -- Desire menu items for the current week
+  CREATE TABLE IF NOT EXISTS menu_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week TEXT NOT NULL,
+    body TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0   -- both-want match checked off & cleared
+  );
+
+  -- Each person's private answer to a menu item
+  CREATE TABLE IF NOT EXISTS menu_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL,
     person TEXT NOT NULL,
-    item TEXT NOT NULL,
-    answer TEXT NOT NULL,            -- yes | maybe | no
-    UNIQUE(person, item)
+    answer TEXT NOT NULL,             -- yes | maybe | no
+    UNIQUE(item_id, person)
   );
 
   -- Points / rewards

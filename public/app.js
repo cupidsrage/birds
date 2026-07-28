@@ -179,17 +179,22 @@ async function drawCard() {
 async function renderDesires(p) {
   const d = await api.get("/api/desires");
   const matchHtml = d.matches.length
-    ? d.matches.map((m) => `<div class="match"><span class="dot ${m.level}"></span><span>${h(m.item)}</span></div>`).join("")
+    ? d.matches.map((m) => `
+        <div class="match">
+          <span class="dot ${m.level}"></span>
+          <span style="flex:1">${h(m.item)}</span>
+          <button class="small" data-done="${m.id}">done</button>
+        </div>`).join("")
     : `<div class="empty">${d.partnerAnswered ? "No overlap yet — keep answering." : `Fill yours in. Matches appear once ${h(me.partner)} answers too.`}</div>`;
   p.innerHTML = `
     <div class="card">
-      <h2>The menu</h2>
-      <p class="sub">Answer privately. Only the things you <em>both</em> say yes or maybe to are revealed.</p>
+      <h2>This week's menu</h2>
+      <p class="sub">Fresh every Sunday night. Answer privately — only the things you <em>both</em> say yes or maybe to are revealed below.</p>
       <div id="menu">
-        ${d.items.map((it, i) => `
+        ${d.items.map((it) => `
           <div class="desire">
             <div class="t">${h(it.item)}</div>
-            <div class="choices" data-item="${h(it.item)}">
+            <div class="choices" data-id="${it.id}">
               ${["yes", "maybe", "no"].map((c) =>
                 `<button class="choice ${c} ${it.myAnswer === c ? "on" : ""}" data-c="${c}">${c}</button>`).join("")}
             </div>
@@ -198,16 +203,20 @@ async function renderDesires(p) {
     </div>
     <div class="card">
       <h2>You both want</h2>
-      <p class="sub">Your shared list for this weekend.</p>
+      <p class="sub">Check one off once you've done it — it clears from the list.${d.doneCount ? ` <span style="color:var(--rose)">${d.doneCount} done this week 🎉</span>` : ""}</p>
       ${matchHtml}
     </div>`;
   p.querySelectorAll(".choices").forEach((row) => {
     row.querySelectorAll(".choice").forEach((btn) => {
       btn.onclick = async () => {
-        await api.post("/api/desires", { item: row.dataset.item, answer: btn.dataset.c });
+        await api.post("/api/desires", { id: Number(row.dataset.id), answer: btn.dataset.c });
         renderPanel();
       };
     });
+  });
+  p.querySelectorAll("[data-done]").forEach((b) => b.onclick = async () => {
+    await api.post(`/api/desires/${b.dataset.done}/done`);
+    renderPanel();
   });
 }
 
@@ -216,32 +225,19 @@ async function renderWishes(p) {
   const wishes = await api.get("/api/wishes");
   p.innerHTML = `
     <div class="card">
-      <h2>Wishlist</h2>
-      <p class="sub">Things to do together — add anything, big or small.</p>
-      <div class="row">
-        <input id="wb" placeholder="Add an idea…" />
-        <button id="wadd">Add</button>
-      </div>
-      <div class="err" id="werr"></div>
-    </div>
-    <div id="wlist"></div>`;
-  document.getElementById("wadd").onclick = async () => {
-    try { await api.post("/api/wishes", { body: document.getElementById("wb").value }); renderPanel(); }
-    catch (e) { document.getElementById("werr").textContent = e.error || "Couldn't add."; }
-  };
-  document.getElementById("wb").onkeydown = (e) => { if (e.key === "Enter") document.getElementById("wadd").click(); };
+      <h2>This week's wishlist</h2>
+      <p class="sub">A fresh set of date ideas every Sunday night. Tap one off when you've done it together.</p>
+      <div id="wlist"></div>
+    </div>`;
   const list = document.getElementById("wlist");
   list.innerHTML = wishes.length ? wishes.map((w) => `
     <div class="item">
       <div style="display:flex;align-items:center;gap:10px;justify-content:space-between">
         <div class="body ${w.done ? "done" : ""}" style="flex:1">${h(w.body)}</div>
-        <button class="small ghost" data-toggle="${w.id}">${w.done ? "undo" : "done"}</button>
-        <button class="small ghost" data-del="${w.id}">✕</button>
+        <button class="small ${w.done ? "ghost" : ""}" data-toggle="${w.id}">${w.done ? "undo" : "done"}</button>
       </div>
-      <div class="meta">by ${h(w.author)}</div>
-    </div>`).join("") : `<div class="empty">Nothing on the list yet.</div>`;
+    </div>`).join("") : `<div class="empty">This week's list is being prepared…</div>`;
   list.querySelectorAll("[data-toggle]").forEach((b) => b.onclick = async () => { await api.post(`/api/wishes/${b.dataset.toggle}/toggle`); renderPanel(); });
-  list.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => { await api.del(`/api/wishes/${b.dataset.del}`); renderPanel(); });
 }
 
 /* ---------------- Points ---------------- */
