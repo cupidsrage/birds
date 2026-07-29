@@ -346,3 +346,27 @@ button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
   background: transparent;
 }
 .heat-ticks { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* ---- Date planner ---- */
+.card.plan { animation: rise 0.4s ease; }
+.timeline { margin-top: 8px; }
+.stop {
+  display: flex; gap: 12px; padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.stop:last-child { border-bottom: none; }
+.stop-time {
+  flex: 0 0 62px; font-family: var(--serif); color: var(--rose);
+  font-size: 15px; padding-top: 1px;
+}
+.stop-body { flex: 1; }
+.stop-name { font-weight: 600; font-size: 16px; }
+.stop-rating { color: var(--gold); font-size: 13px; font-weight: 600; }
+.stop-why { color: var(--text); font-size: 14px; margin-top: 3px; line-height: 1.4; opacity: 0.92; }
+.stop-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.stop-hours { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.stop-hours summary { cursor: pointer; color: var(--rose); }
+.stop-map {
+  display: inline-block; margin-top: 6px; font-size: 13px;
+  color: var(--rose); text-decoration: none; font-weight: 600;
+}

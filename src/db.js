@@ -98,6 +98,19 @@ db.exec(`
     sub TEXT NOT NULL,               -- full subscription JSON
     created_at INTEGER NOT NULL
   );
+
+  -- Saved AI date plans (shared — both can see)
+  CREATE TABLE IF NOT EXISTS date_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    author TEXT NOT NULL,
+    city TEXT NOT NULL,
+    date TEXT,
+    time TEXT,
+    duration REAL,
+    vibe TEXT,
+    plan TEXT NOT NULL,              -- full itinerary JSON
+    created_at INTEGER NOT NULL
+  );
 `);
 
 // ---- Migrations ----

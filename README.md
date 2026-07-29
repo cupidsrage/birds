@@ -45,6 +45,7 @@ NAME_A=Blake NAME_B=Robin PASS_A=secret1 PASS_B=secret2 SESSION_SECRET=anything 
    | `TZ` | *(recommended)* your timezone so "Sunday 8pm" is local, not UTC — e.g. `America/Chicago` |
    | `VAPID_PUBLIC` / `VAPID_PRIVATE` | *(recommended)* your own push keys. Generate with `npx web-push generate-vapid-keys`. Defaults are baked in so push works immediately, but set your own for privacy. |
    | `VAPID_SUBJECT` | *(optional)* a `mailto:` address for the push service, e.g. `mailto:you@example.com` |
+   | `GOOGLE_PLACES_KEY` | *(optional)* enables the date planner to pull real venues with live ratings & hours. Get one at console.cloud.google.com (enable the Places API — free tier covers thousands of lookups/month). Without it, the planner still works using the AI's own suggestions. |
    | `NODE_ENV` | `production` |
 
 ### Notifications

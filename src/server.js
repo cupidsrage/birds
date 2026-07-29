@@ -13,6 +13,7 @@ import crypto from "crypto";
 import db from "./db.js";
 import { DECK } from "./content.js";
 import { generateMenu, generateWishes, generateCard } from "./generate.js";
+import { planDate } from "./dateplanner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -313,6 +314,46 @@ app.post("/api/buzz", auth, async (req, res) => {
   sendEvent(req.partner, { t: "buzz", from: req.person });
   // And a push notification if they're not looking.
   await notify(req.partner, { title: `${req.person} is thinking of you 💭`, body: "", url: "/" });
+  res.json({ ok: true });
+});
+
+// ---------- Date planner ----------
+app.post("/api/date/plan", auth, async (req, res) => {
+  const { city, date, time, duration, vibe } = req.body || {};
+  if (!city || !city.trim()) return res.status(400).json({ error: "Where should the date be?" });
+  const durationHours = Math.max(1, Math.min(12, parseFloat(duration) || 4));
+  try {
+    const plan = await planDate({
+      city: city.trim(),
+      date: date || "this weekend",
+      time: time || "6:00 PM",
+      durationHours,
+      vibe: vibe || "romantic",
+    });
+    if (plan.error) return res.status(502).json({ error: plan.error });
+    res.json(plan);
+  } catch (e) {
+    console.error("date plan failed:", e.message);
+    res.status(502).json({ error: "Couldn't plan the date. Try again in a moment." });
+  }
+});
+
+app.get("/api/date/plans", auth, (req, res) => {
+  const rows = db.prepare(`SELECT id, author, city, date, time, duration, vibe, plan, created_at FROM date_plans ORDER BY created_at DESC LIMIT 30`).all();
+  res.json(rows.map((r) => ({ ...r, plan: JSON.parse(r.plan) })));
+});
+
+app.post("/api/date/plans", auth, (req, res) => {
+  const { city, date, time, duration, vibe, plan } = req.body || {};
+  if (!plan || !city) return res.status(400).json({ error: "Nothing to save." });
+  db.prepare(`INSERT INTO date_plans (author, city, date, time, duration, vibe, plan, created_at) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(req.person, city, date || null, time || null, parseFloat(duration) || null, vibe || null, JSON.stringify(plan), Date.now());
+  notify(req.partner, { title: `${req.person} saved a date idea 💕`, body: `${plan.title || city}`, url: "/" });
+  res.json({ ok: true });
+});
+
+app.delete("/api/date/plans/:id", auth, (req, res) => {
+  db.prepare(`DELETE FROM date_plans WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
 });
 

@@ -125,6 +125,7 @@ const TABS = [
   ["notes", "Love notes"],
   ["deck", "Deck"],
   ["draw", "Draw"],
+  ["dates", "Dates"],
   ["inbox", "Inbox"],
   ["desires", "The menu"],
   ["wishes", "Wishlist"],
@@ -217,6 +218,7 @@ async function renderPanel() {
     if (tab === "notes") return renderNotes(p);
     if (tab === "deck") return renderDeck(p);
     if (tab === "draw") return renderDraw(p);
+    if (tab === "dates") return renderDates(p);
     if (tab === "inbox") return renderInbox(p);
     if (tab === "desires") return renderDesires(p);
     if (tab === "wishes") return renderWishes(p);
@@ -681,6 +683,146 @@ function setupCanvas() {
 
   // Expose teardown so leaving the tab closes the socket.
   window.__canvas = { teardown() { try { ws.close(); } catch {} window.removeEventListener("resize", onResize); } };
+}
+
+/* ---------------- Date planner ---------------- */
+const VIBE_OPTIONS = [
+  ["romantic", "💕 Romantic"],
+  ["adventurous", "🧗 Adventurous"],
+  ["chill", "😌 Chill"],
+  ["foodie", "🍽️ Foodie"],
+  ["cultural", "🎭 Cultural"],
+  ["fun", "🎉 Fun"],
+];
+let lastPlan = null; // holds the most recent generated plan + inputs
+
+async function renderDates(p) {
+  const saved = await api.get("/api/date/plans");
+  p.innerHTML = `
+    <div class="card">
+      <h2>Plan a date</h2>
+      <p class="sub">Tell me where and when — I'll plan the whole thing.</p>
+      <div class="stack">
+        <input id="dcity" placeholder="City (e.g. Little Rock, AR)" />
+        <div class="row">
+          <input id="ddate" type="date" />
+          <input id="dtime" type="time" value="18:00" />
+        </div>
+        <div class="row">
+          <select id="ddur">
+            <option value="2">2 hours</option>
+            <option value="3">3 hours</option>
+            <option value="4" selected>4 hours</option>
+            <option value="6">6 hours</option>
+            <option value="8">All day</option>
+          </select>
+          <select id="dvibe">
+            ${VIBE_OPTIONS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}
+          </select>
+        </div>
+        <button id="dplan">Plan our date</button>
+        <div class="err" id="derr"></div>
+      </div>
+    </div>
+    <div id="dresult"></div>
+    <div class="card">
+      <h2>Saved dates</h2>
+      <div id="dsaved"></div>
+    </div>`;
+
+  document.getElementById("dplan").onclick = planDateNow;
+  renderSavedPlans(saved);
+}
+
+async function planDateNow() {
+  const city = document.getElementById("dcity").value.trim();
+  const err = document.getElementById("derr");
+  err.textContent = "";
+  if (!city) { err.textContent = "Where should the date be?"; return; }
+  const btn = document.getElementById("dplan");
+  btn.disabled = true; btn.textContent = "Planning… (this takes a few seconds)";
+  const inputs = {
+    city,
+    date: document.getElementById("ddate").value || "this weekend",
+    time: fmtTime(document.getElementById("dtime").value),
+    duration: document.getElementById("ddur").value,
+    vibe: document.getElementById("dvibe").value,
+  };
+  try {
+    const plan = await api.post("/api/date/plan", inputs);
+    lastPlan = { inputs, plan };
+    renderPlanResult(plan);
+  } catch (e) {
+    err.textContent = e.error || "Couldn't plan the date. Try again.";
+  } finally {
+    btn.disabled = false; btn.textContent = "Plan our date";
+  }
+}
+
+function fmtTime(v) {
+  if (!v) return "6:00 PM";
+  const [hh, mm] = v.split(":").map(Number);
+  const ampm = hh >= 12 ? "PM" : "AM";
+  const h12 = hh % 12 || 12;
+  return `${h12}:${String(mm).padStart(2, "0")} ${ampm}`;
+}
+
+function renderPlanResult(plan) {
+  const el = document.getElementById("dresult");
+  if (!el) return;
+  el.innerHTML = `
+    <div class="card plan">
+      <h2>${h(plan.title || "Your date")}</h2>
+      ${plan.narrative ? `<p class="sub">${h(plan.narrative)}</p>` : ""}
+      <div class="timeline">
+        ${(plan.stops || []).map((s) => `
+          <div class="stop">
+            <div class="stop-time">${h(s.arrival || "")}</div>
+            <div class="stop-body">
+              <div class="stop-name">${h(s.name || "")}${s.rating ? ` <span class="stop-rating">★ ${s.rating}</span>` : ""}</div>
+              ${s.why ? `<div class="stop-why">${h(s.why)}</div>` : ""}
+              ${s.address ? `<div class="stop-meta">${h(s.address)}</div>` : ""}
+              ${s.hours && s.hours.length ? `<details class="stop-hours"><summary>Hours</summary>${s.hours.map((d) => `<div>${h(d)}</div>`).join("")}</details>` : ""}
+              ${s.mapsUrl ? `<a class="stop-map" href="${h(s.mapsUrl)}" target="_blank" rel="noopener">Open in Maps →</a>` : ""}
+            </div>
+          </div>`).join("")}
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button id="dsave" style="flex:1">Save this date</button>
+        <button class="ghost" id="dredo">Redo</button>
+      </div>
+      ${plan.usedRealPlaces === false ? `<div class="stop-meta" style="margin-top:8px">Tip: add a Google Places key for live ratings & hours.</div>` : ""}
+    </div>`;
+  document.getElementById("dsave").onclick = async () => {
+    const btn = document.getElementById("dsave");
+    btn.disabled = true; btn.textContent = "Saved ✓";
+    try {
+      await api.post("/api/date/plans", { ...lastPlan.inputs, plan });
+      if (window.FX) FX.burst({ count: 20 });
+      renderSavedPlans(await api.get("/api/date/plans"));
+    } catch { btn.disabled = false; btn.textContent = "Save this date"; }
+  };
+  document.getElementById("dredo").onclick = planDateNow;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderSavedPlans(saved) {
+  const el = document.getElementById("dsaved");
+  if (!el) return;
+  if (!saved.length) { el.innerHTML = `<div class="empty">No saved dates yet.</div>`; return; }
+  el.innerHTML = saved.map((s) => `
+    <div class="item">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+        <div class="who">${h(s.plan.title || s.city)}</div>
+        <button class="small ghost" data-del="${s.id}">✕</button>
+      </div>
+      <div class="stop-meta">${h(s.city)}${s.date ? ` · ${h(s.date)}` : ""} · by ${h(s.author)}</div>
+      <div class="body" style="margin-top:6px">${(s.plan.stops || []).map((x) => h(x.name)).filter(Boolean).join(" → ")}</div>
+    </div>`).join("");
+  el.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    await api.del(`/api/date/plans/${b.dataset.del}`);
+    renderSavedPlans(await api.get("/api/date/plans"));
+  });
 }
 
 /* ---------------- Points ---------------- */
