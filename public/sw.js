@@ -1,4 +1,4 @@
-const CACHE = "weekend-v15";
+const CACHE = "weekend-v16";
 const ASSETS = ["/", "/index.html", "/app.js", "/fx.js", "/styles.css", "/manifest.json", "/icon.svg", "/icon-180.png", "/icon-192.png", "/icon-512.png", "/icon-maskable.png"];
 
 self.addEventListener("install", (e) => {

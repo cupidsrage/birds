@@ -79,23 +79,25 @@ export async function generateWishes(n = 6) {
 }
 
 // Rotating themes and formats injected per-draw so the model doesn't converge
-// on the same handful of cards every time.
+// on the same handful of cards every time. IMPORTANT: these are phrased as open
+// prompts the couple fills in themselves — never as specific invented events, so
+// the AI can't fabricate memories that never happened.
 const CARD_THEMES = [
-  "a favorite memory of each other",
+  "inviting them to share a favorite memory of the two of you (let THEM pick it — don't invent one)",
   "something you find attractive about the other",
   "a shared dream or future plan",
   "a playful confession",
   "physical touch and closeness",
   "flirty teasing",
   "something you miss during the week apart",
-  "a fantasy or wish for the weekend",
+  "a hope or wish for the upcoming weekend together",
   "gratitude and appreciation",
   "a silly or funny 'would you rather'",
-  "first impressions and how you met",
+  "asking them to recall a first impression (let THEM answer — don't assume how they met)",
   "a small romantic gesture to do together",
   "what makes you feel wanted",
   "a compliment you've never said out loud",
-  "an adventure you'd take together",
+  "an adventure you'd love to take together someday",
 ];
 const CARD_FORMATS = [
   "a question to answer in words",
@@ -104,22 +106,23 @@ const CARD_FORMATS = [
   "a fill-in-the-blank sentence to complete",
   "a this-or-that quick choice",
   "a dare to describe something in detail",
-  "a question about the past",
-  "a question about the future",
+  "a question inviting them to recall something (open-ended — they supply the memory)",
+  "a question about what they'd like in the future",
 ];
 
 // Spicier themes that unlock at higher heat levels, layered on top of the sweet
-// ones above so the mix gets bolder as the dial goes up.
+// ones above so the mix gets bolder as the dial goes up. Also phrased as open
+// prompts — the couple supplies the specifics, the AI never invents them.
 const SPICY_THEMES = [
   "a turn-on you have not admitted",
   "something you want done to you this weekend",
-  "a favorite intimate memory together",
+  "inviting them to share a favorite intimate memory (THEY choose it — don't invent one)",
   "what you would do first if they walked in right now",
-  "a fantasy involving the two of you",
+  "a fantasy you'd like to try together",
   "a piece of clothing you want them in (or out of)",
   "where and how you want to be touched",
   "a bold dare to send a flirty photo",
-  "the naughtiest thought you had about them this week",
+  "a naughty thought you'd like to share with them",
 ];
 
 // Per-level guidance handed to the model so it actually calibrates spice.
@@ -133,7 +136,7 @@ const HEAT_GUIDE = {
 
 function randOf(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-export async function generateCard(heat = 2) {
+export async function generateCard(heat = 2, names = {}) {
   const level = Math.max(1, Math.min(5, parseInt(heat, 10) || 2));
   if (!API_KEY) return DECK[Math.floor(Math.random() * DECK.length)];
 
@@ -145,13 +148,24 @@ export async function generateCard(heat = 2) {
   const wantDare = Math.random() < (0.3 + level * 0.08);
   const seed = crypto.randomBytes(3).toString("hex");
 
-  const prompt = `You are generating ONE card for a flirty, adult game between two consenting adult partners in a committed long-distance relationship who only see each other on weekends. This is a private game between the two of them.
+  // The two real people, if provided, so cards can address them naturally.
+  const me = names.me || null;       // the person drawing the card
+  const partner = names.partner || null;
+  const whoLine = me && partner
+    ? `The two people are ${me} (who is drawing this card) and ${partner} (their partner). You may address ${me} directly and refer to ${partner} by name.`
+    : `Address the player directly and refer to "your partner".`;
+
+  const prompt = `You are generating ONE card for a flirty, adult game between two consenting adult partners in a committed long-distance relationship who only see each other on weekends. This is a private game between just the two of them.
+
+${whoLine}
+
+CRITICAL RULE: You know nothing about their actual history, memories, trips, or experiences. NEVER invent or assume specific shared events, places, dates, or past moments (do not say things like "that night at the hotel," "remember when you...," "recreate your first date"). You have no idea what they've actually done together. Instead, ask open questions that let THEM supply their own memories and specifics. When a theme mentions a memory, phrase it as an invitation for them to recall or share one — never state that a particular event happened.
 
 HEAT LEVEL: ${level} of 5. ${HEAT_GUIDE[level]}
 
 This card should be ${wantDare ? "a DARE" : "a QUESTION"}, themed loosely around: ${theme}.
 Format it as: ${format}.
-Match the heat level above precisely — do not water it down at higher levels. Make it fresh and specific; avoid clichés like "record a voice note" or "what are you most looking forward to." Vary your wording widely from card to card. Under 30 words.
+Match the heat level above precisely — do not water it down at higher levels. Make it fresh and specific in wording (but never inventing false shared history); avoid clichés like "record a voice note." Vary your wording widely from card to card. Under 30 words.
 
 (Variety seed: ${seed} — use this to ensure this card differs from any you'd typically produce.)
 
