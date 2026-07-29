@@ -319,7 +319,7 @@ app.post("/api/buzz", auth, async (req, res) => {
 
 // ---------- Date planner ----------
 app.post("/api/date/plan", auth, async (req, res) => {
-  const { city, date, time, duration, vibe } = req.body || {};
+  const { city, date, time, duration, vibe, budget } = req.body || {};
   if (!city || !city.trim()) return res.status(400).json({ error: "Where should the date be?" });
   const durationHours = Math.max(1, Math.min(12, parseFloat(duration) || 4));
   try {
@@ -329,6 +329,7 @@ app.post("/api/date/plan", auth, async (req, res) => {
       time: time || "6:00 PM",
       durationHours,
       vibe: vibe || "romantic",
+      budget: budget || null,
     });
     if (plan.error) return res.status(502).json({ error: plan.error });
     res.json(plan);

@@ -84,17 +84,22 @@ const VIBES = {
   fun: "playful and fun — games, activities, lively spots, lots to laugh about together",
 };
 
-// Main entry. Returns { title, narrative, stops: [{name,time,duration,why,...place}] }.
-export async function planDate({ city, date, time, durationHours, vibe }) {
+// Main entry. Returns { title, narrative, stops: [...], totalCost, budget }.
+export async function planDate({ city, date, time, durationHours, vibe, budget }) {
   if (!API_KEY) {
     return { error: "The date planner needs an AI key to work. Ask whoever set up the app to add ANTHROPIC_API_KEY." };
   }
   const vibeDesc = VIBES[vibe] || VIBES.romantic;
+  const budgetNum = budget && parseFloat(budget) > 0 ? Math.round(parseFloat(budget)) : null;
+  const budgetLine = budgetNum
+    ? `Total budget: about $${budgetNum} for the two of them combined. Keep the whole date within this — choose venues and activities whose combined cost fits, and prefer options that leave a little room.`
+    : `No strict budget, but keep it reasonable for a couple.`;
 
   // Stage 1: what kinds of stops fit?
   const planPrompt = `Plan a date itinerary for a couple in ${city}.
 Start: ${date} at ${time}. Total duration: about ${durationHours} hours.
 Vibe: ${vibeDesc}.
+${budgetLine}
 
 Decide on a sequence of 2-5 stops that fit naturally in the time available and flow well together (e.g. an activity, then dinner, then a drink). For each stop, give a short search query I can use to find a REAL matching venue in ${city} (be specific to the city and vibe, e.g. "rooftop cocktail bar downtown" or "waterfront seafood restaurant").
 
@@ -118,21 +123,34 @@ No other text.`;
   }
 
   // Stage 3: arrange into a narrated, timed itinerary using the real places.
+  const priceHint = (lvl) => {
+    const map = { PRICE_LEVEL_INEXPENSIVE: "$ (inexpensive)", PRICE_LEVEL_MODERATE: "$$ (moderate)", PRICE_LEVEL_EXPENSIVE: "$$$ (pricey)", PRICE_LEVEL_VERY_EXPENSIVE: "$$$$ (very pricey)" };
+    return map[lvl] || null;
+  };
   const placeLines = stops.map((s, i) => {
     if (s.place) {
-      return `${i + 1}. [${s.kind}] ${s.place.name} — ${s.place.address}${s.place.rating ? ` (rated ${s.place.rating})` : ""}`;
+      const ph = priceHint(s.place.priceLevel);
+      return `${i + 1}. [${s.kind}] ${s.place.name} — ${s.place.address}${s.place.rating ? ` (rated ${s.place.rating})` : ""}${ph ? ` [price: ${ph}]` : ""}`;
     }
     return `${i + 1}. [${s.kind}] (suggest a well-known ${s.query || s.kind} in ${city})`;
   }).join("\n");
+
+  const budgetNote = budgetNum
+    ? `The couple's total budget is about $${budgetNum} combined. Make the cost estimates realistic and keep the sum at or under this budget where possible; if it's tight, note it.`
+    : `Give realistic cost estimates for a couple.`;
 
   const arrangePrompt = `Create a warm, romantic date itinerary for a couple in ${city} starting ${date} at ${time}, lasting about ${durationHours} hours. Vibe: ${vibeDesc}.
 
 Use these real venues in order:
 ${placeLines}
 
+${budgetNote}
+
+For each stop, estimate the realistic cost FOR TWO PEOPLE in whole US dollars (use the price hints where given; a free activity like a park walk is 0).
+
 Return ONLY JSON:
-{"title":"short evocative title","narrative":"2-3 sentence intro to the evening","stops":[{"name":"venue name","arrival":"7:00 PM","why":"one warm sentence on why this stop and what to do here"}]}
-Keep each "why" under 30 words. Match the number of stops to the venues above, in the same order.`;
+{"title":"short evocative title","narrative":"2-3 sentence intro to the evening","stops":[{"name":"venue name","arrival":"7:00 PM","why":"one warm sentence on why this stop and what to do here","cost":45}]}
+Keep each "why" under 30 words. "cost" is a whole-dollar number for two people at that stop. Match the number of stops to the venues above, in the same order.`;
 
   let arranged;
   try {
@@ -149,6 +167,7 @@ Keep each "why" under 30 words. Match the number of stops to the venues above, i
   // Merge the real place data (address, rating, hours, maps link) back in by order.
   const merged = (arranged.stops || []).map((st, i) => ({
     ...st,
+    cost: Number.isFinite(st.cost) ? Math.max(0, Math.round(st.cost)) : null,
     ...(stops[i]?.place ? {
       address: stops[i].place.address,
       rating: stops[i].place.rating,
@@ -159,10 +178,15 @@ Keep each "why" under 30 words. Match the number of stops to the venues above, i
     } : {}),
   }));
 
+  const totalCost = merged.reduce((sum, s) => sum + (s.cost || 0), 0);
+
   return {
     title: arranged.title || `Your date in ${city}`,
     narrative: arranged.narrative || "",
     stops: merged,
+    totalCost,
+    budget: budgetNum,
+    overBudget: budgetNum ? totalCost > budgetNum : false,
     usedRealPlaces: !!PLACES_KEY,
   };
 }

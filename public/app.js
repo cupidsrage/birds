@@ -720,6 +720,10 @@ async function renderDates(p) {
             ${VIBE_OPTIONS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}
           </select>
         </div>
+        <div class="budget-field">
+          <span class="budget-prefix">$</span>
+          <input id="dbudget" type="number" min="0" step="10" placeholder="Budget for two (optional)" />
+        </div>
         <button id="dplan">Plan our date</button>
         <div class="err" id="derr"></div>
       </div>
@@ -747,6 +751,7 @@ async function planDateNow() {
     time: fmtTime(document.getElementById("dtime").value),
     duration: document.getElementById("ddur").value,
     vibe: document.getElementById("dvibe").value,
+    budget: document.getElementById("dbudget").value || null,
   };
   try {
     const plan = await api.post("/api/date/plan", inputs);
@@ -770,16 +775,23 @@ function fmtTime(v) {
 function renderPlanResult(plan) {
   const el = document.getElementById("dresult");
   if (!el) return;
+  const money = (n) => (n === 0 ? "Free" : `$${n}`);
+  const totalLine = plan.totalCost != null
+    ? `<div class="cost-total ${plan.overBudget ? "over" : ""}">
+         Estimated total: <strong>$${plan.totalCost}</strong> for two${plan.budget ? ` · budget $${plan.budget}${plan.overBudget ? " (a bit over)" : " ✓"}` : ""}
+       </div>`
+    : "";
   el.innerHTML = `
     <div class="card plan">
       <h2>${h(plan.title || "Your date")}</h2>
       ${plan.narrative ? `<p class="sub">${h(plan.narrative)}</p>` : ""}
+      ${totalLine}
       <div class="timeline">
         ${(plan.stops || []).map((s) => `
           <div class="stop">
             <div class="stop-time">${h(s.arrival || "")}</div>
             <div class="stop-body">
-              <div class="stop-name">${h(s.name || "")}${s.rating ? ` <span class="stop-rating">★ ${s.rating}</span>` : ""}</div>
+              <div class="stop-name">${h(s.name || "")}${s.rating ? ` <span class="stop-rating">★ ${s.rating}</span>` : ""}${s.cost != null ? ` <span class="stop-cost">${money(s.cost)}</span>` : ""}</div>
               ${s.why ? `<div class="stop-why">${h(s.why)}</div>` : ""}
               ${s.address ? `<div class="stop-meta">${h(s.address)}</div>` : ""}
               ${s.hours && s.hours.length ? `<details class="stop-hours"><summary>Hours</summary>${s.hours.map((d) => `<div>${h(d)}</div>`).join("")}</details>` : ""}
