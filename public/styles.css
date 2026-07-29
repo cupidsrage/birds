@@ -270,3 +270,52 @@ button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
   font-size: 14px; color: var(--text);
 }
 .push-banner.ok { justify-content: center; color: var(--yes); }
+
+/* ---- Ambient background FX ---- */
+#fx-glow, #fx-canvas {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+}
+#fx-canvas { z-index: 1; }
+/* Content sits above the FX layers. */
+.wrap, .login, .logout { position: relative; z-index: 2; }
+
+#fx-glow {
+  opacity: 0.55;
+  background: transparent;
+  animation: glow-drift 18s ease-in-out infinite alternate;
+}
+@keyframes glow-drift {
+  0%   { background-position: 20% 30%, 80% 70%; }
+  100% { background-position: 35% 60%, 65% 40%; }
+}
+/* Theme-specific soft light. Two radial blooms that drift. */
+#fx-glow[data-theme="glow"],
+#fx-glow[data-theme="combined"] {
+  background:
+    radial-gradient(closest-side, rgba(224,138,158,0.35), transparent 70%),
+    radial-gradient(closest-side, rgba(201,160,224,0.28), transparent 70%);
+  background-size: 70% 70%, 60% 60%;
+  background-repeat: no-repeat;
+  background-position: 25% 30%, 75% 70%;
+}
+#fx-glow[data-theme="hearts"] {
+  background:
+    radial-gradient(closest-side, rgba(224,138,158,0.22), transparent 70%),
+    radial-gradient(closest-side, rgba(232,195,158,0.18), transparent 70%);
+  background-size: 80% 80%, 60% 60%;
+  background-repeat: no-repeat;
+  background-position: 30% 25%, 70% 75%;
+}
+#fx-glow[data-theme="sparkles"] {
+  background:
+    radial-gradient(closest-side, rgba(142,197,224,0.20), transparent 70%),
+    radial-gradient(closest-side, rgba(201,160,224,0.20), transparent 70%);
+  background-size: 65% 65%, 65% 65%;
+  background-repeat: no-repeat;
+  background-position: 20% 35%, 80% 65%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #fx-glow { animation: none; }
+  #fx-canvas { display: none; }
+}

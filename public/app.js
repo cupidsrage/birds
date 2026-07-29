@@ -119,6 +119,8 @@ function renderApp() {
   document.querySelectorAll(".tab").forEach((b) => b.onclick = () => { tab = b.dataset.tab; renderApp(); });
   document.getElementById("buzz").onclick = async (e) => {
     const btn = e.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    if (window.FX) FX.burst({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, count: 30 });
     btn.disabled = true;
     const original = btn.textContent;
     try {
@@ -397,7 +399,13 @@ async function renderDesires(p, retried) {
   p.querySelectorAll(".choices").forEach((row) => {
     row.querySelectorAll(".choice").forEach((btn) => {
       btn.onclick = async () => {
+        const before = d.matches.length;
         await api.post("/api/desires", { id: Number(row.dataset.id), answer: btn.dataset.c });
+        // Re-check: if this answer created a new mutual match, celebrate.
+        try {
+          const after = await api.get("/api/desires");
+          if (window.FX && after.matches.length > before) FX.burst({ count: 32 });
+        } catch {}
         renderPanel();
       };
     });
@@ -604,6 +612,7 @@ function setupCanvas() {
     try {
       const image = canvas.toDataURL("image/png");
       await api.post("/api/drawings", { image });
+      if (window.FX) FX.burst({ count: 24 });
       renderGallery(await api.get("/api/drawings"));
     } catch (e) {
       document.getElementById("drawerr").textContent = e.error || "Couldn't save.";
