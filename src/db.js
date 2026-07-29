@@ -89,6 +89,15 @@ db.exec(`
     photo TEXT NOT NULL,             -- filename in the photos dir (PNG snapshot)
     created_at INTEGER NOT NULL
   );
+
+  -- Web Push subscriptions (one or more devices per person)
+  CREATE TABLE IF NOT EXISTS push_subs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person TEXT NOT NULL,
+    endpoint TEXT NOT NULL UNIQUE,
+    sub TEXT NOT NULL,               -- full subscription JSON
+    created_at INTEGER NOT NULL
+  );
 `);
 
 // ---- Migrations ----

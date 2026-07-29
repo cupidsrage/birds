@@ -43,7 +43,16 @@ NAME_A=Blake NAME_B=Robin PASS_A=secret1 PASS_B=secret2 SESSION_SECRET=anything 
    | `ANTHROPIC_API_KEY` | *(optional)* enables AI-generated weekly items. Get one at console.anthropic.com. Without it, a built-in pool is used. |
    | `ANTHROPIC_MODEL` | *(optional)* defaults to `claude-sonnet-4-6` |
    | `TZ` | *(recommended)* your timezone so "Sunday 8pm" is local, not UTC — e.g. `America/Chicago` |
+   | `VAPID_PUBLIC` / `VAPID_PRIVATE` | *(recommended)* your own push keys. Generate with `npx web-push generate-vapid-keys`. Defaults are baked in so push works immediately, but set your own for privacy. |
+   | `VAPID_SUBJECT` | *(optional)* a `mailto:` address for the push service, e.g. `mailto:you@example.com` |
    | `NODE_ENV` | `production` |
+
+### Notifications
+
+The app can send push notifications — a "thinking of you" buzz, and a ping whenever one of you sends a note, photo, drawing, or points. Each person taps "Turn on" once to allow notifications on their device.
+
+- **iPhone:** push only works *after* you Add the app to your Home Screen (install it as a PWA). It won't work in a Safari tab — that's an Apple limitation, not a bug.
+- **Android:** works in Chrome directly, though installing to the home screen is still recommended.
 
 5. Railway sets `PORT` automatically. Deploy — you'll get a public URL.
 6. Open the URL on your phones and **Add to Home Screen** to install it as an app.

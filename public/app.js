@@ -11,6 +11,34 @@ const api = {
 
 const h = (s) => (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// ---- Push notifications ----
+function urlB64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+async function enablePush() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    return { ok: false, reason: "This device doesn't support notifications." };
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") return { ok: false, reason: "Notifications weren't allowed." };
+  const reg = await navigator.serviceWorker.ready;
+  const { key } = await api.get("/api/push/key");
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlB64ToUint8Array(key),
+  });
+  await api.post("/api/push/subscribe", { subscription: sub });
+  return { ok: true };
+}
+
+async function pushSupported() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
 function timeLeft(target) {
   const ms = new Date(target).getTime() - Date.now();
   if (ms <= 0) return { big: "It's time", lbl: "together at last" };
@@ -79,7 +107,9 @@ function renderApp() {
           <div class="big">${t.big}</div>
           <div class="lbl">${t.lbl}</div>
         </div>
+        <button class="buzz" id="buzz">💭 Thinking of you</button>
       </div>
+      <div id="pushbanner"></div>
       <div class="tabs">
         ${TABS.map(([k, l]) => `<button class="tab ${k === tab ? "on" : ""}" data-tab="${k}">${l}${k === "inbox" ? `<span class="badge" id="inboxbadge" hidden></span>` : ""}</button>`).join("")}
       </div>
@@ -87,8 +117,45 @@ function renderApp() {
     </div>`;
   document.getElementById("logout").onclick = async () => { await api.post("/api/logout"); location.reload(); };
   document.querySelectorAll(".tab").forEach((b) => b.onclick = () => { tab = b.dataset.tab; renderApp(); });
+  document.getElementById("buzz").onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const original = btn.textContent;
+    try {
+      await api.post("/api/buzz");
+      if (navigator.vibrate) navigator.vibrate(60);
+      btn.textContent = "💗 Sent!";
+    } catch {
+      btn.textContent = "Couldn't send";
+    }
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1800);
+  };
   refreshBadge();
+  maybeShowPushBanner();
   renderPanel();
+}
+
+async function maybeShowPushBanner() {
+  const el = document.getElementById("pushbanner");
+  if (!el) return;
+  if (!(await pushSupported())) return;
+  // Already granted and subscribed on the server? Then don't nag.
+  if (Notification.permission === "granted") {
+    try { const s = await api.get("/api/push/status"); if (s.subscribed) return; } catch {}
+  }
+  if (Notification.permission === "denied") return; // can't re-prompt; stay quiet
+  el.innerHTML = `
+    <div class="push-banner">
+      <span>Get notified when ${h(me.partner)} sends you something</span>
+      <button class="small" id="enablepush">Turn on</button>
+    </div>`;
+  document.getElementById("enablepush").onclick = async () => {
+    const btn = document.getElementById("enablepush");
+    btn.disabled = true; btn.textContent = "…";
+    const res = await enablePush().catch(() => ({ ok: false, reason: "Something went wrong." }));
+    if (res.ok) { el.innerHTML = `<div class="push-banner ok">Notifications are on 🔔</div>`; setTimeout(() => { el.innerHTML = ""; }, 2500); }
+    else { el.innerHTML = `<div class="push-banner">${h(res.reason)}</div>`; }
+  };
 }
 
 async function refreshBadge() {

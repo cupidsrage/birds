@@ -4,6 +4,7 @@ import multer from "multer";
 import sharp from "sharp";
 import http from "http";
 import { WebSocketServer } from "ws";
+import webpush from "web-push";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { mkdirSync } from "fs";
@@ -30,6 +31,38 @@ const NAME_B = process.env.NAME_B || "Me";
 const PASS_A = process.env.PASS_A || "changeme-a";
 const PASS_B = process.env.PASS_B || "changeme-b";
 const COUNTDOWN_TARGET = process.env.COUNTDOWN_TARGET || defaultSaturday();
+
+// ---- Web Push (VAPID) ----
+// These defaults let push work out of the box; for real privacy, regenerate your
+// own with `npx web-push generate-vapid-keys` and set them as env vars.
+const VAPID_PUBLIC = process.env.VAPID_PUBLIC || "BPqoSE_OHx2SrZVFcQ9A99lGUt8IP17NH2Pp9jGBX286kHQ1qPJjj0w-lo1SNs_aMWgHS9ez_1pQs2DQOKAhVMA";
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE || "XvgWMvBKFoiuAK4KNxt1N2MysPsHfc6GpYX9c-_53zc";
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:weekend@example.com";
+let pushReady = false;
+try {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
+  pushReady = true;
+} catch (e) {
+  console.error("Web Push disabled — invalid VAPID config:", e.message);
+}
+
+// Send a notification to everyone EXCEPT the actor (usually: notify the partner).
+async function notify(targetPerson, { title, body, url }) {
+  if (!pushReady) return;
+  const subs = db.prepare(`SELECT id, sub FROM push_subs WHERE person = ?`).all(targetPerson);
+  for (const row of subs) {
+    try {
+      await webpush.sendNotification(JSON.parse(row.sub), JSON.stringify({ title, body, url: url || "/" }));
+    } catch (e) {
+      // 404/410 mean the subscription is dead — clean it up.
+      if (e.statusCode === 404 || e.statusCode === 410) {
+        db.prepare(`DELETE FROM push_subs WHERE id = ?`).run(row.id);
+      } else {
+        console.error("push send failed:", e.statusCode || e.message);
+      }
+    }
+  }
+}
 
 function defaultSaturday() {
   const d = new Date();
@@ -167,6 +200,10 @@ app.post("/api/notes", auth, (req, res) => {
   if (!body || !body.trim()) return res.status(400).json({ error: "Write something first." });
   const when = unlock_at ? new Date(unlock_at).getTime() : Date.now();
   db.prepare(`INSERT INTO notes (author, body, unlock_at, created_at) VALUES (?,?,?,?)`).run(req.person, body.trim(), when, Date.now());
+  // Only ping now if the note is already unlocked; timed notes stay a surprise.
+  if (when <= Date.now()) {
+    notify(req.partner, { title: `${req.person} left you a note`, body: "", url: "/" });
+  }
   res.json({ ok: true });
 });
 
@@ -242,6 +279,37 @@ app.post("/api/points", auth, (req, res) => {
   // Points are a gift: they go to your partner, credited from you.
   db.prepare(`INSERT INTO points (person, giver, delta, reason, created_at) VALUES (?,?,?,?,?)`)
     .run(req.partner, req.person, n, reason.trim(), Date.now());
+  notify(req.partner, { title: `${req.person} gave you ${n} point${Math.abs(n) === 1 ? "" : "s"}`, body: reason.trim(), url: "/" });
+  res.json({ ok: true });
+});
+
+// ---------- Push notifications ----------
+app.get("/api/push/key", (req, res) => res.json({ key: VAPID_PUBLIC }));
+
+app.post("/api/push/subscribe", auth, (req, res) => {
+  const sub = req.body?.subscription;
+  if (!sub || !sub.endpoint) return res.status(400).json({ error: "Bad subscription." });
+  db.prepare(`INSERT INTO push_subs (person, endpoint, sub, created_at) VALUES (?,?,?,?)
+              ON CONFLICT(endpoint) DO UPDATE SET person = excluded.person, sub = excluded.sub`)
+    .run(req.person, sub.endpoint, JSON.stringify(sub), Date.now());
+  res.json({ ok: true });
+});
+
+app.post("/api/push/unsubscribe", auth, (req, res) => {
+  const endpoint = req.body?.endpoint;
+  if (endpoint) db.prepare(`DELETE FROM push_subs WHERE endpoint = ?`).run(endpoint);
+  res.json({ ok: true });
+});
+
+// Is the current person set up to receive push on any device?
+app.get("/api/push/status", auth, (req, res) => {
+  const c = db.prepare(`SELECT COUNT(*) AS c FROM push_subs WHERE person = ?`).get(req.person).c;
+  res.json({ subscribed: c > 0 });
+});
+
+// The "thinking of you" buzz — sends a gentle nudge to the partner.
+app.post("/api/buzz", auth, async (req, res) => {
+  await notify(req.partner, { title: `${req.person} is thinking of you 💭`, body: "", url: "/" });
   res.json({ ok: true });
 });
 
@@ -274,6 +342,7 @@ app.post("/api/deck/answers", auth, upload.single("photo"), async (req, res) => 
   if (filename) {
     db.prepare(`INSERT INTO messages (sender, recipient, body, photo, prompt, seen, created_at) VALUES (?,?,?,?,?,0,?)`)
       .run(req.person, req.partner, body || null, filename, prompt, Date.now());
+    notify(req.partner, { title: `${req.person} sent you a photo 📷`, body: "answering a dare", url: "/" });
   }
   res.json({ ok: true, sentPhoto: !!filename });
 });
@@ -298,6 +367,7 @@ app.post("/api/inbox", auth, upload.single("photo"), async (req, res) => {
   if (req.file) filename = await savePhoto(req.file.buffer);
   db.prepare(`INSERT INTO messages (sender, recipient, body, photo, prompt, seen, created_at) VALUES (?,?,?,?,?,0,?)`)
     .run(req.person, req.partner, body || null, filename, null, Date.now());
+  notify(req.partner, { title: filename ? `${req.person} sent you a photo 📷` : `${req.person} sent you a message`, body: filename ? "" : (body || "").slice(0, 60), url: "/" });
   res.json({ ok: true });
 });
 
@@ -362,6 +432,7 @@ app.post("/api/drawings", auth, express.json({ limit: "8mb" }), async (req, res)
     .jpeg({ quality: 85 })
     .toFile(join(photosDir, name));
   db.prepare(`INSERT INTO drawings (author, photo, created_at) VALUES (?,?,?)`).run(req.person, name, Date.now());
+  notify(req.partner, { title: `${req.person} saved a drawing 🎨`, body: "", url: "/" });
   res.json({ ok: true });
 });
 
