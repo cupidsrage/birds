@@ -309,6 +309,9 @@ app.get("/api/push/status", auth, (req, res) => {
 
 // The "thinking of you" buzz — sends a gentle nudge to the partner.
 app.post("/api/buzz", auth, async (req, res) => {
+  // Live heart-burst on the partner's screen if their app is open right now.
+  sendEvent(req.partner, { t: "buzz", from: req.person });
+  // And a push notification if they're not looking.
   await notify(req.partner, { title: `${req.person} is thinking of you 💭`, body: "", url: "/" });
   res.json({ ok: true });
 });
@@ -449,17 +452,29 @@ app.use(express.static(join(__dirname, "..", "public")));
 
 const PORT = process.env.PORT || 3000;
 
-// ---- Live shared canvas (WebSocket) ----
-// Both partners connect to one room. Strokes broadcast to the other in real
-// time. We keep a capped in-memory history so someone opening the canvas mid-way
-// sees what's already been drawn. History resets on "clear" and on server
-// restart (the saved gallery is the durable record, not the live canvas).
+// ---- Live WebSockets ----
+// Two sockets share one HTTP server:
+//   /ws/canvas — live shared drawing (open only on the Draw tab)
+//   /ws/events — always-on app events (e.g. buzz bursts) while the app is open
 const httpServer = http.createServer(app);
-const wss = new WebSocketServer({ server: httpServer, path: "/ws/canvas" });
+const wss = new WebSocketServer({ noServer: true });        // canvas
+const eventsWss = new WebSocketServer({ noServer: true });  // app events
+
+httpServer.on("upgrade", (req, socket, head) => {
+  const { url } = req;
+  if (url === "/ws/canvas") {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  } else if (url === "/ws/events") {
+    eventsWss.handleUpgrade(req, socket, head, (ws) => eventsWss.emit("connection", ws, req));
+  } else {
+    socket.destroy();
+  }
+});
 
 let strokeHistory = [];            // array of stroke messages
 const MAX_HISTORY = 5000;          // cap so memory can't grow unbounded
 const clients = new Set();
+const eventClients = new Set();    // always-on event listeners
 
 function cookieValue(header, key) {
   if (!header) return null;
@@ -520,6 +535,29 @@ function broadcast(obj, except) {
   const data = JSON.stringify(obj);
   for (const c of clients) {
     if (c !== except && c.readyState === 1) {
+      try { c.send(data); } catch {}
+    }
+  }
+}
+
+// ---- Always-on app events socket ----
+eventsWss.on("connection", (ws, req) => {
+  const name = verify(cookieValue(req.headers.cookie, "session"));
+  if (!name || (name !== NAME_A && name !== NAME_B)) {
+    ws.close(4001, "unauthorized");
+    return;
+  }
+  ws.person = name;
+  eventClients.add(ws);
+  ws.on("close", () => eventClients.delete(ws));
+  ws.on("error", () => eventClients.delete(ws));
+});
+
+// Send a live event to a specific person's open app windows (if any).
+function sendEvent(person, obj) {
+  const data = JSON.stringify(obj);
+  for (const c of eventClients) {
+    if (c.person === person && c.readyState === 1) {
       try { c.send(data); } catch {}
     }
   }

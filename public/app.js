@@ -54,10 +54,45 @@ async function boot() {
   if (!m.name) return renderLogin(m.names);
   me = m;
   renderApp();
+  connectEvents();
   setInterval(() => {
     const el = document.querySelector(".countdown");
     if (el) { const t = timeLeft(me.countdownTarget); el.querySelector(".big").textContent = t.big; el.querySelector(".lbl").textContent = t.lbl; }
   }, 30000);
+}
+
+// Always-on socket for live app events (currently: buzz bursts). Auto-reconnects.
+let eventsSock = null;
+function connectEvents() {
+  try {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    eventsSock = new WebSocket(`${proto}://${location.host}/ws/events`);
+    eventsSock.onmessage = (ev) => {
+      let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.t === "buzz") {
+        // She opened / has the app open — shower her screen with hearts.
+        if (window.FX) FX.burst({ count: 40, kind: "heart" });
+        if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+        showBuzzToast(msg.from);
+      }
+    };
+    // Reconnect if the socket drops (backgrounded, network blip, redeploy).
+    eventsSock.onclose = () => { setTimeout(connectEvents, 4000); };
+    eventsSock.onerror = () => { try { eventsSock.close(); } catch {} };
+  } catch {}
+}
+
+function showBuzzToast(from) {
+  let el = document.getElementById("buzz-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "buzz-toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = `💗 ${from} is thinking of you`;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 3500);
 }
 
 /* ---------------- Login ---------------- */
@@ -664,6 +699,21 @@ async function renderPoints(p) {
 }
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.register("/sw.js").then((reg) => {
+    // Check for updates whenever the app regains focus, so a redeploy is picked
+    // up promptly rather than only on a cold start.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") reg.update().catch(() => {});
+    });
+  }).catch(() => {});
+
+  // When a new service worker takes over (a new deploy), reload once so the
+  // fresh HTML/JS/CSS is used immediately — no manual hard refresh needed.
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
 }
 boot();

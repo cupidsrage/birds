@@ -319,3 +319,14 @@ button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
   #fx-glow { animation: none; }
   #fx-canvas { display: none; }
 }
+
+/* ---- Buzz toast (live incoming buzz) ---- */
+#buzz-toast {
+  position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom));
+  transform: translate(-50%, 20px); z-index: 5;
+  background: var(--card); border: 1px solid var(--rose-deep);
+  color: var(--text); padding: 12px 20px; border-radius: 24px;
+  box-shadow: var(--shadow); font-weight: 600; font-size: 15px;
+  opacity: 0; pointer-events: none; transition: opacity 0.3s ease, transform 0.3s ease;
+}
+#buzz-toast.show { opacity: 1; transform: translate(-50%, 0); }

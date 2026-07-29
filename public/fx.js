@@ -38,21 +38,39 @@
   const particles = [];
   function spawnAmbient(kind) {
     const x = rand(0, innerWidth);
+    const isHeart = kind === "heart";
     particles.push({
       kind,
       x,
       y: innerHeight + 20,
-      vx: rand(-0.15, 0.15),
-      vy: rand(-0.35, -0.9),
-      size: kind === "heart" ? rand(9, 20) : rand(1.5, 3.5),
+      vx: rand(-0.2, 0.2),
+      // Both hearts and sparks rise fast enough to cross the whole screen.
+      // Sparks are a touch slower and smaller, but still reach the top.
+      vy: isHeart ? rand(-1.1, -1.9) : rand(-0.9, -1.5),
+      size: isHeart ? rand(9, 20) : rand(1.5, 3.5),
       rot: rand(0, Math.PI * 2),
       vr: rand(-0.01, 0.01),
       color: pick(COLORS),
       life: 1,
-      decay: rand(0.0012, 0.0028),
+      // Near-zero time-decay for both — the position-based fade (ambientAlpha)
+      // handles visibility, so particles stay lit across their whole climb.
+      decay: 0.0004,
       twinkle: Math.random() * Math.PI * 2,
+      sway: rand(0, Math.PI * 2),   // gentle horizontal drift
+      swaySpeed: rand(0.005, 0.02),
       ambient: true,
     });
+  }
+
+  // How visible an ambient particle is, based on where it is on screen: it
+  // eases in near the bottom and eases out only in the very top slice, so the
+  // most-visible upper area still has hearts in it.
+  function ambientAlpha(p) {
+    const yn = p.y / innerHeight; // 1 at bottom, 0 at top
+    let a = 1;
+    if (yn > 0.92) a = (1 - yn) / 0.08;        // fade in over the bottom 8%
+    else if (yn < 0.12) a = yn / 0.12;          // fade out over the top 12%
+    return Math.max(0, Math.min(1, a)) * p.life;
   }
 
   function drawHeart(p) {
@@ -61,7 +79,7 @@
     ctx.translate(p.x * dpr, p.y * dpr);
     ctx.rotate(p.rot);
     ctx.scale(dpr, dpr);
-    ctx.globalAlpha = 0.55 * p.life;
+    ctx.globalAlpha = 0.6 * (p.ambient ? ambientAlpha(p) : p.life);
     ctx.fillStyle = p.color;
     ctx.beginPath();
     // Simple heart via two arcs + a point.
@@ -76,7 +94,8 @@
 
   function drawSpark(p) {
     ctx.save();
-    ctx.globalAlpha = (0.4 + 0.6 * Math.abs(Math.sin(p.twinkle))) * p.life;
+    const twinkle = 0.4 + 0.6 * Math.abs(Math.sin(p.twinkle));
+    ctx.globalAlpha = twinkle * (p.ambient ? ambientAlpha(p) : p.life);
     ctx.fillStyle = p.color;
     ctx.beginPath();
     ctx.arc(p.x * dpr, p.y * dpr, p.size * dpr, 0, Math.PI * 2);
@@ -112,12 +131,19 @@
 
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
-      p.x += p.vx * (p.ambient ? 1 : 6);
-      p.y += p.vy * (p.ambient ? 1 : 6);
-      if (!p.ambient) p.vy += 0.06; // burst particles arc and fall
+      if (p.ambient) {
+        p.sway += p.swaySpeed;
+        p.x += p.vx + Math.sin(p.sway) * 0.3; // drift left/right as it rises
+        p.y += p.vy;
+      } else {
+        p.x += p.vx * 6;
+        p.y += p.vy * 6;
+        p.vy += 0.06; // burst particles arc and fall
+      }
       p.rot += p.vr;
       p.twinkle += 0.15;
       p.life -= p.decay * (p.ambient ? 1 : 3);
+      // Remove only once fully off the top or life exhausted.
       if (p.life <= 0 || p.y < -40) { particles.splice(i, 1); continue; }
       if (p.kind === "heart") drawHeart(p); else drawSpark(p);
     }
