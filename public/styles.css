@@ -316,8 +316,9 @@ button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #fx-glow { animation: none; }
-  #fx-canvas { display: none; }
+  /* Keep the ambient FX visible but calmer — the JS already reduces particle
+     count and speed; here we just slow the glow drift rather than hide anything. */
+  #fx-glow { animation-duration: 40s; }
 }
 
 /* ---- Buzz toast (live incoming buzz) ---- */

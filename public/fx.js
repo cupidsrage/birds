@@ -4,7 +4,12 @@
  * Pure canvas + CSS. Sits behind all content, respects reduced-motion.
  */
 (function () {
+  // Respect Reduce Motion by CALMING the animation (fewer, slower particles),
+  // not by removing it — a gentle ambient drift isn't the jarring motion that
+  // setting is meant to prevent, and disabling it entirely made the whole
+  // effect invisible on the many phones that have Reduce Motion on.
   const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const calm = reduceMotion ? 0.5 : 1; // motion/quantity multiplier
 
   // Layers: a CSS glow div (soft shifting light) + a canvas (particles).
   const glow = document.createElement("div");
@@ -120,8 +125,8 @@
     if (!running) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (theme !== "glow" && !reduceMotion) {
-      if (t - lastEmit > ambientEvery()) {
+    if (theme !== "glow") {
+      if (t - lastEmit > ambientEvery() / calm) {
         lastEmit = t;
         if (theme === "hearts") spawnAmbient("heart");
         else if (theme === "sparkles") spawnAmbient("spark");
@@ -159,10 +164,9 @@
 
   // A celebratory burst from a point (defaults to screen center-top).
   function burst(opts = {}) {
-    if (reduceMotion) return;
     const cx = opts.x != null ? opts.x : innerWidth / 2;
     const cy = opts.y != null ? opts.y : innerHeight * 0.35;
-    const n = opts.count || 26;
+    const n = Math.round((opts.count || 26) * calm);
     const kind = opts.kind || "mixed";
     for (let i = 0; i < n; i++) {
       const angle = rand(0, Math.PI * 2);
@@ -192,7 +196,11 @@
     glow.dataset.theme = theme;
     canvas.dataset.theme = theme;
     resize();
-    if (!reduceMotion) start();
+    start();
+    // iOS Safari can report a wrong/zero viewport size at first paint; re-fit a
+    // couple of times after layout settles so the canvas isn't left zero-sized.
+    setTimeout(resize, 300);
+    setTimeout(resize, 1000);
   }
 
   addEventListener("resize", resize);
