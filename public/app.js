@@ -7,6 +7,29 @@ const api = {
   async post(p, b) { const r = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}) }); if (!r.ok) throw await r.json().catch(() => ({})); return r.json(); },
   async form(p, fd) { const r = await fetch(p, { method: "POST", body: fd }); if (!r.ok) throw await r.json().catch(() => ({})); return r.json(); },
   async del(p) { const r = await fetch(p, { method: "DELETE" }); return r.json(); },
+  // For slow endpoints (AI planning): explicit timeout + tolerant error parsing.
+  // iOS Safari can abort long fetches silently, so we give it a clear timeout and
+  // surface a real message instead of failing blank.
+  async postSlow(p, b, ms = 60000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const r = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}), signal: ctrl.signal });
+      if (!r.ok) {
+        // Error body may be JSON or (on a gateway timeout) HTML — handle both.
+        const txt = await r.text().catch(() => "");
+        let msg = "";
+        try { msg = JSON.parse(txt).error; } catch { msg = ""; }
+        throw { error: msg || (r.status === 504 ? "That took too long — try again." : `Something went wrong (${r.status}).`) };
+      }
+      return r.json();
+    } catch (e) {
+      if (e.name === "AbortError") throw { error: "That took too long on this connection. Try again." };
+      throw e.error ? e : { error: "Couldn't reach the server. Check your connection and try again." };
+    } finally {
+      clearTimeout(timer);
+    }
+  },
 };
 
 const h = (s) => (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -754,7 +777,7 @@ async function planDateNow() {
     budget: document.getElementById("dbudget").value || null,
   };
   try {
-    const plan = await api.post("/api/date/plan", inputs);
+    const plan = await api.postSlow("/api/date/plan", inputs);
     lastPlan = { inputs, plan };
     renderPlanResult(plan);
   } catch (e) {

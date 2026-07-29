@@ -37,11 +37,28 @@ async function askClaude(prompt, maxTokens = 1500) {
 }
 
 function parseJSON(text) {
-  const clean = text.replace(/```json|```/g, "").trim();
-  // Grab the first {...} or [...] block to be safe.
+  let clean = text.replace(/```json/gi, "").replace(/```/g, "").trim();
   const start = clean.search(/[[{]/);
   if (start === -1) throw new Error("no JSON found");
-  return JSON.parse(clean.slice(start));
+  clean = clean.slice(start);
+  // Trim any trailing prose after the JSON by finding the matching close bracket.
+  const open = clean[0];
+  const close = open === "[" ? "]" : "}";
+  let depth = 0, end = -1, inStr = false, esc = false;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === open) depth++;
+    else if (ch === close) { depth--; if (depth === 0) { end = i; break; } }
+  }
+  const slice = end === -1 ? clean : clean.slice(0, end + 1);
+  return JSON.parse(slice);
 }
 
 // ---- Google Places (New) Text Search ----
@@ -108,19 +125,27 @@ Return ONLY a JSON array like:
 No other text.`;
 
   let skeleton;
-  try {
-    skeleton = parseJSON(await askClaude(planPrompt, 800));
-    if (!Array.isArray(skeleton) || !skeleton.length) throw new Error("bad skeleton");
-  } catch (e) {
-    return { error: "Couldn't design the plan. Try again in a moment." };
+  let lastErr = "";
+  for (let attempt = 0; attempt < 2 && !skeleton; attempt++) {
+    try {
+      const parsed = parseJSON(await askClaude(planPrompt, 800));
+      if (!Array.isArray(parsed) || !parsed.length) throw new Error("not a non-empty array");
+      skeleton = parsed;
+    } catch (e) {
+      lastErr = e.message;
+      console.error(`date skeleton attempt ${attempt + 1} failed:`, e.message);
+    }
+  }
+  if (!skeleton) {
+    return { error: `Couldn't design the plan (${lastErr || "try again"}). Give it another try.` };
   }
 
   // Stage 2: look up a real place for each stop (if Places is configured).
-  const stops = [];
-  for (const s of skeleton.slice(0, 5)) {
-    const place = await searchPlace(s.query || s.kind, city);
-    stops.push({ kind: s.kind, query: s.query, minutes: s.minutes || 60, place });
-  }
+  // Run all lookups in parallel — sequential was slow enough to risk a gateway
+  // timeout on some networks/devices.
+  const skel = skeleton.slice(0, 5);
+  const places = await Promise.all(skel.map((s) => searchPlace(s.query || s.kind, city)));
+  const stops = skel.map((s, i) => ({ kind: s.kind, query: s.query, minutes: s.minutes || 60, place: places[i] }));
 
   // Stage 3: arrange into a narrated, timed itinerary using the real places.
   const priceHint = (lvl) => {
