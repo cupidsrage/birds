@@ -318,7 +318,8 @@ app.post("/api/buzz", auth, async (req, res) => {
 
 // ---------- Deck ----------
 app.get("/api/deck/draw", auth, async (req, res) => {
-  const card = await generateCard();
+  const heat = parseInt(req.query.heat, 10) || 2;
+  const card = await generateCard(heat);
   res.json(card);
 });
 app.get("/api/deck/answers", auth, (req, res) => res.json(db.prepare(`SELECT * FROM answers ORDER BY created_at DESC LIMIT 50`).all()));

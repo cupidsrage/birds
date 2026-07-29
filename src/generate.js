@@ -108,21 +108,50 @@ const CARD_FORMATS = [
   "a question about the future",
 ];
 
+// Spicier themes that unlock at higher heat levels, layered on top of the sweet
+// ones above so the mix gets bolder as the dial goes up.
+const SPICY_THEMES = [
+  "a turn-on you have not admitted",
+  "something you want done to you this weekend",
+  "a favorite intimate memory together",
+  "what you would do first if they walked in right now",
+  "a fantasy involving the two of you",
+  "a piece of clothing you want them in (or out of)",
+  "where and how you want to be touched",
+  "a bold dare to send a flirty photo",
+  "the naughtiest thought you had about them this week",
+];
+
+// Per-level guidance handed to the model so it actually calibrates spice.
+const HEAT_GUIDE = {
+  1: "Keep it sweet, romantic, and totally PG — affection and warmth, no innuendo.",
+  2: "Flirty and playful with light innuendo. Suggestive but still tasteful.",
+  3: "Clearly sexy and suggestive. Teasing, a little daring, PG-13 to soft R.",
+  4: "Bold and steamy. Explicit desire and intimacy are welcome; be direct and turn up the heat.",
+  5: "Very explicit and uninhibited. Fully adult, graphic, and daring — hold nothing back. Both partners are consenting adults who want maximum spice.",
+};
+
 function randOf(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-export async function generateCard() {
+export async function generateCard(heat = 2) {
+  const level = Math.max(1, Math.min(5, parseInt(heat, 10) || 2));
   if (!API_KEY) return DECK[Math.floor(Math.random() * DECK.length)];
 
-  const theme = randOf(CARD_THEMES);
+  // At higher heat, pull more often from the spicy theme pool.
+  const spicyChance = (level - 1) / 4; // 0 at lvl1 → 1 at lvl5
+  const theme = Math.random() < spicyChance ? randOf(SPICY_THEMES) : randOf(CARD_THEMES);
   const format = randOf(CARD_FORMATS);
-  const wantDare = Math.random() < 0.4; // ~40% dares, 60% questions
+  // More dares as it heats up.
+  const wantDare = Math.random() < (0.3 + level * 0.08);
   const seed = crypto.randomBytes(3).toString("hex");
 
-  const prompt = `You are generating ONE card for a flirty game between two adult partners in a long-distance relationship who only see each other on weekends.
+  const prompt = `You are generating ONE card for a flirty, adult game between two consenting adult partners in a committed long-distance relationship who only see each other on weekends. This is a private game between the two of them.
+
+HEAT LEVEL: ${level} of 5. ${HEAT_GUIDE[level]}
 
 This card should be ${wantDare ? "a DARE" : "a QUESTION"}, themed loosely around: ${theme}.
 Format it as: ${format}.
-Make it fresh and specific — avoid clichés like "record a voice note" or "what are you most looking forward to." Vary your wording and ideas widely from card to card. Keep it warm and tasteful rather than explicit, under 25 words.
+Match the heat level above precisely — do not water it down at higher levels. Make it fresh and specific; avoid clichés like "record a voice note" or "what are you most looking forward to." Vary your wording widely from card to card. Under 30 words.
 
 (Variety seed: ${seed} — use this to ensure this card differs from any you'd typically produce.)
 

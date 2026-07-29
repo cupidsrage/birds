@@ -266,16 +266,30 @@ async function renderNotes(p) {
 let currentCard = null;
 async function renderDeck(p) {
   const answers = await api.get("/api/deck/answers");
+  const heat = getHeat();
   p.innerHTML = `
     <div class="card">
       <h2>Draw a card</h2>
       <p class="sub">A fresh question or dare each time. Answer with words, a photo, or both — photos go straight to ${h(me.partner)}'s inbox.</p>
+      <div class="heat">
+        <div class="heat-row">
+          <span class="heat-label">Heat</span>
+          <span class="heat-value" id="heatval">${HEAT_NAMES[heat - 1]}</span>
+        </div>
+        <input id="heat" type="range" min="1" max="5" step="1" value="${heat}" />
+        <div class="heat-ticks"><span>😊 mild</span><span>🔥 wild</span></div>
+      </div>
       <div class="draw" id="draw"><div class="q">Tap to draw</div></div>
       <div style="height:12px"></div>
       <div class="row"><button id="drawbtn" style="flex:1">Draw a card</button></div>
       <div id="answerbox" style="margin-top:12px"></div>
     </div>
     <div id="alist"></div>`;
+  const heatInput = document.getElementById("heat");
+  heatInput.oninput = () => {
+    setHeat(Number(heatInput.value));
+    document.getElementById("heatval").textContent = HEAT_NAMES[Number(heatInput.value) - 1];
+  };
   document.getElementById("drawbtn").onclick = drawCard;
   document.getElementById("draw").onclick = drawCard;
   const list = document.getElementById("alist");
@@ -283,10 +297,18 @@ async function renderDeck(p) {
     ? answers.map((a) => `<div class="item"><div class="who">${h(a.person)} · ${h(a.prompt)}</div><div class="body">${h(a.body)}</div></div>`).join("")
     : `<div class="empty">No answers yet.</div>`;
 }
+
+const HEAT_NAMES = ["Sweet", "Flirty", "Spicy", "Steamy", "Wild"];
+function getHeat() {
+  const v = parseInt(localStorage.getItem("deck_heat"), 10);
+  return v >= 1 && v <= 5 ? v : 2;
+}
+function setHeat(v) { try { localStorage.setItem("deck_heat", String(v)); } catch {} }
+
 async function drawCard() {
   const draw = document.getElementById("draw");
   draw.innerHTML = `<div class="q">Drawing…</div>`;
-  currentCard = await api.get("/api/deck/draw");
+  currentCard = await api.get(`/api/deck/draw?heat=${getHeat()}`);
   draw.innerHTML = `<div><div class="kind">${currentCard.type}</div><div class="q">${h(currentCard.text)}</div></div>`;
   document.getElementById("answerbox").innerHTML = `
     <textarea id="ab" placeholder="Your answer…"></textarea>
