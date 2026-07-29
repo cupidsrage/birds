@@ -61,6 +61,7 @@ function renderLogin() {
 const TABS = [
   ["notes", "Love notes"],
   ["deck", "Deck"],
+  ["draw", "Draw"],
   ["inbox", "Inbox"],
   ["desires", "The menu"],
   ["wishes", "Wishlist"],
@@ -101,11 +102,17 @@ async function refreshBadge() {
 }
 
 async function renderPanel() {
+  // Tearing down any live canvas connection when leaving the Draw tab.
+  if (tab !== "draw" && window.__canvas && window.__canvas.teardown) {
+    window.__canvas.teardown();
+    window.__canvas = null;
+  }
   const p = document.getElementById("panel");
   p.innerHTML = `<div class="empty">Loading…</div>`;
   try {
     if (tab === "notes") return renderNotes(p);
     if (tab === "deck") return renderDeck(p);
+    if (tab === "draw") return renderDraw(p);
     if (tab === "inbox") return renderInbox(p);
     if (tab === "desires") return renderDesires(p);
     if (tab === "wishes") return renderWishes(p);
@@ -369,6 +376,178 @@ async function renderWishes(p, retried) {
       </div>
     </div>`).join("");
   list.querySelectorAll("[data-toggle]").forEach((b) => b.onclick = async () => { await api.post(`/api/wishes/${b.dataset.toggle}/toggle`); renderPanel(); });
+}
+
+/* ---------------- Draw (live shared canvas) ---------------- */
+const PALETTE = ["#e08a9e", "#e8c39e", "#7bc99a", "#8ec5e0", "#c9a0e0", "#ffffff", "#1a1220"];
+
+async function renderDraw(p) {
+  const drawings = await api.get("/api/drawings");
+  p.innerHTML = `
+    <div class="card">
+      <h2>Draw together</h2>
+      <p class="sub">Draw with your finger — <span id="presence">connecting…</span>. Save a drawing to keep it in your gallery below.</p>
+      <div class="canvas-wrap">
+        <canvas id="canvas"></canvas>
+      </div>
+      <div class="tools">
+        <div class="swatches" id="swatches">
+          ${PALETTE.map((c, i) => `<button class="swatch ${i === 0 ? "on" : ""}" style="background:${c}" data-color="${c}"></button>`).join("")}
+        </div>
+        <div class="tool-row">
+          <input id="brush" type="range" min="1" max="40" value="5" />
+          <button class="small tool-btn" id="eraser">Eraser</button>
+          <button class="small tool-btn" id="clear">Clear</button>
+          <button class="small" id="save">Save</button>
+        </div>
+      </div>
+      <div class="err" id="drawerr"></div>
+    </div>
+    <div class="card">
+      <h2>Gallery</h2>
+      <p class="sub">Drawings you've saved together.</p>
+      <div id="gallery"></div>
+    </div>`;
+
+  renderGallery(drawings);
+  setupCanvas();
+}
+
+function renderGallery(drawings) {
+  const g = document.getElementById("gallery");
+  if (!g) return;
+  g.innerHTML = drawings.length
+    ? `<div class="gallery-grid">${drawings.map((d) => `
+        <div class="gitem">
+          <img src="/api/photo/${encodeURIComponent(d.photo)}" loading="lazy" alt="drawing by ${h(d.author)}" />
+          <button class="gdel" data-del="${d.id}">✕</button>
+        </div>`).join("")}</div>`
+    : `<div class="empty">No saved drawings yet.</div>`;
+  g.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    await api.del(`/api/drawings/${b.dataset.del}`);
+    renderGallery(await api.get("/api/drawings"));
+  });
+}
+
+function setupCanvas() {
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  let color = PALETTE[0];
+  let size = 5;
+  let erasing = false;
+  let drawing = false;
+  let last = null;
+
+  // Size the canvas to its container at device resolution for crisp lines.
+  function fit() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    // Preserve what's drawn across a resize.
+    const prev = canvas.width ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.width * dpr); // square canvas
+    canvas.style.height = rect.width + "px";
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (prev) ctx.putImageData(prev, 0, 0);
+  }
+  fit();
+
+  // Coordinates are stored normalized (0..1) so both phones render the same
+  // drawing regardless of screen size.
+  function norm(e) {
+    const rect = canvas.getBoundingClientRect();
+    const pt = e.touches ? e.touches[0] : e;
+    return { x: (pt.clientX - rect.left) / rect.width, y: (pt.clientY - rect.top) / rect.height };
+  }
+  function drawSeg(s, remote) {
+    const w = canvas.width / (window.devicePixelRatio || 1);
+    const hh = canvas.height / (window.devicePixelRatio || 1);
+    ctx.globalCompositeOperation = s.erase ? "destination-out" : "source-over";
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.size;
+    ctx.beginPath();
+    ctx.moveTo(s.x0 * w, s.y0 * hh);
+    ctx.lineTo(s.x1 * w, s.y1 * hh);
+    ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // ---- WebSocket ----
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws/canvas`);
+  const presence = document.getElementById("presence");
+  ws.onopen = () => { if (presence) presence.textContent = "connected"; };
+  ws.onclose = () => { if (presence) presence.textContent = "offline"; };
+  ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.t === "init") {
+      msg.strokes.forEach((s) => drawSeg(s, true));
+    } else if (msg.t === "stroke") {
+      drawSeg(msg, true);
+    } else if (msg.t === "clear") {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    } else if (msg.t === "presence") {
+      if (presence) presence.textContent = msg.online >= 2 ? `${h(me.partner)} is here too` : "just you right now";
+    }
+  };
+  const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+
+  // ---- Pointer handling ----
+  function start(e) { e.preventDefault(); drawing = true; last = norm(e); }
+  function move(e) {
+    if (!drawing) return;
+    e.preventDefault();
+    const pt = norm(e);
+    const seg = { t: "stroke", x0: last.x, y0: last.y, x1: pt.x, y1: pt.y, color, size, erase: erasing };
+    drawSeg(seg, false);
+    send(seg);
+    last = pt;
+  }
+  function end() { drawing = false; last = null; }
+
+  canvas.addEventListener("touchstart", start, { passive: false });
+  canvas.addEventListener("touchmove", move, { passive: false });
+  canvas.addEventListener("touchend", end);
+  canvas.addEventListener("mousedown", start);
+  canvas.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", end);
+
+  // ---- Tools ----
+  document.getElementById("swatches").querySelectorAll(".swatch").forEach((b) => b.onclick = () => {
+    document.querySelectorAll(".swatch").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    color = b.dataset.color;
+    erasing = false;
+    document.getElementById("eraser").classList.remove("on");
+  });
+  document.getElementById("brush").oninput = (e) => { size = Number(e.target.value); };
+  document.getElementById("eraser").onclick = (e) => {
+    erasing = !erasing;
+    e.target.classList.toggle("on", erasing);
+  };
+  document.getElementById("clear").onclick = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    send({ t: "clear" });
+  };
+  document.getElementById("save").onclick = async () => {
+    const btn = document.getElementById("save");
+    btn.disabled = true; btn.textContent = "Saving…";
+    try {
+      const image = canvas.toDataURL("image/png");
+      await api.post("/api/drawings", { image });
+      renderGallery(await api.get("/api/drawings"));
+    } catch (e) {
+      document.getElementById("drawerr").textContent = e.error || "Couldn't save.";
+    } finally { btn.disabled = false; btn.textContent = "Save"; }
+  };
+
+  const onResize = () => fit();
+  window.addEventListener("resize", onResize);
+
+  // Expose teardown so leaving the tab closes the socket.
+  window.__canvas = { teardown() { try { ws.close(); } catch {} window.removeEventListener("resize", onResize); } };
 }
 
 /* ---------------- Points ---------------- */

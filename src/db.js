@@ -81,6 +81,14 @@ db.exec(`
     seen INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
+
+  -- Saved drawings gallery (shared — both can see all)
+  CREATE TABLE IF NOT EXISTS drawings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    author TEXT NOT NULL,
+    photo TEXT NOT NULL,             -- filename in the photos dir (PNG snapshot)
+    created_at INTEGER NOT NULL
+  );
 `);
 
 // ---- Migrations ----

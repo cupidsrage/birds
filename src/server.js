@@ -2,6 +2,8 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import multer from "multer";
 import sharp from "sharp";
+import http from "http";
+import { WebSocketServer } from "ws";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { mkdirSync } from "fs";
@@ -314,13 +316,14 @@ app.get("/api/inbox/unseen", auth, (req, res) => {
   res.json({ unseen: c });
 });
 
-// Serve a photo, but only to its sender or recipient.
+// Serve a photo. Inbox photos are private to sender/recipient; drawing snapshots
+// are shared, so either partner may view them.
 app.get("/api/photo/:name", auth, async (req, res) => {
   const name = req.params.name;
   const msg = db.prepare(`SELECT sender, recipient FROM messages WHERE photo = ?`).get(name);
-  if (!msg || (msg.sender !== req.person && msg.recipient !== req.person)) {
-    return res.status(404).end();
-  }
+  const drawing = db.prepare(`SELECT id FROM drawings WHERE photo = ?`).get(name);
+  const allowed = drawing || (msg && (msg.sender === req.person || msg.recipient === req.person));
+  if (!allowed) return res.status(404).end();
   try {
     const buf = await readFile(join(photosDir, name));
     res.type("image/jpeg").send(buf);
@@ -340,15 +343,121 @@ app.delete("/api/inbox/:id", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Drawings gallery ----------
+app.get("/api/drawings", auth, (req, res) => {
+  res.json(db.prepare(`SELECT id, author, photo, created_at FROM drawings ORDER BY created_at DESC`).all());
+});
+
+// Save the current canvas as a shared drawing. Body is a data URL (PNG).
+app.post("/api/drawings", auth, express.json({ limit: "8mb" }), async (req, res) => {
+  const dataUrl = req.body?.image || "";
+  const m = /^data:image\/png;base64,(.+)$/.exec(dataUrl);
+  if (!m) return res.status(400).json({ error: "No drawing to save." });
+  const buffer = Buffer.from(m[1], "base64");
+  const name = `draw-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.jpg`;
+  // Flatten onto the app background and store as JPEG to keep it small.
+  await sharp(buffer)
+    .flatten({ background: "#1a1220" })
+    .resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toFile(join(photosDir, name));
+  db.prepare(`INSERT INTO drawings (author, photo, created_at) VALUES (?,?,?)`).run(req.person, name, Date.now());
+  res.json({ ok: true });
+});
+
+app.delete("/api/drawings/:id", auth, async (req, res) => {
+  const d = db.prepare(`SELECT id, photo FROM drawings WHERE id = ?`).get(req.params.id);
+  if (!d) return res.status(404).json({ error: "Not found." });
+  db.prepare(`DELETE FROM drawings WHERE id = ?`).run(d.id);
+  try { await unlink(join(photosDir, d.photo)); } catch {}
+  res.json({ ok: true });
+});
+
 // ---- Static ----
 app.use(express.static(join(__dirname, "..", "public")));
 
 const PORT = process.env.PORT || 3000;
 
+// ---- Live shared canvas (WebSocket) ----
+// Both partners connect to one room. Strokes broadcast to the other in real
+// time. We keep a capped in-memory history so someone opening the canvas mid-way
+// sees what's already been drawn. History resets on "clear" and on server
+// restart (the saved gallery is the durable record, not the live canvas).
+const httpServer = http.createServer(app);
+const wss = new WebSocketServer({ server: httpServer, path: "/ws/canvas" });
+
+let strokeHistory = [];            // array of stroke messages
+const MAX_HISTORY = 5000;          // cap so memory can't grow unbounded
+const clients = new Set();
+
+function cookieValue(header, key) {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === key) return decodeURIComponent(v.join("="));
+  }
+  return null;
+}
+
+wss.on("connection", (ws, req) => {
+  // Authenticate the socket using the same signed session cookie as the API.
+  const name = verify(cookieValue(req.headers.cookie, "session"));
+  if (!name || (name !== NAME_A && name !== NAME_B)) {
+    ws.close(4001, "unauthorized");
+    return;
+  }
+  ws.person = name;
+  clients.add(ws);
+
+  // Send current canvas state to the newcomer so they see what's there.
+  ws.send(JSON.stringify({ t: "init", strokes: strokeHistory }));
+  broadcast({ t: "presence", online: clients.size }, null);
+
+  ws.on("message", (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.t === "stroke") {
+      const stroke = { t: "stroke", person: name, ...sanitizeStroke(msg) };
+      strokeHistory.push(stroke);
+      if (strokeHistory.length > MAX_HISTORY) strokeHistory = strokeHistory.slice(-MAX_HISTORY);
+      broadcast(stroke, ws); // send to the other client(s)
+    } else if (msg.t === "clear") {
+      strokeHistory = [];
+      broadcast({ t: "clear", person: name }, null); // include sender so both clear
+    }
+  });
+
+  ws.on("close", () => {
+    clients.delete(ws);
+    broadcast({ t: "presence", online: clients.size }, null);
+  });
+  ws.on("error", () => { clients.delete(ws); });
+});
+
+function sanitizeStroke(m) {
+  // Only pass through the fields we expect, coerced to safe types.
+  const num = (x) => (typeof x === "number" && isFinite(x) ? x : 0);
+  return {
+    x0: num(m.x0), y0: num(m.y0), x1: num(m.x1), y1: num(m.y1),
+    color: typeof m.color === "string" ? m.color.slice(0, 24) : "#e08a9e",
+    size: Math.max(1, Math.min(80, num(m.size) || 4)),
+    erase: !!m.erase,
+  };
+}
+
+function broadcast(obj, except) {
+  const data = JSON.stringify(obj);
+  for (const c of clients) {
+    if (c !== except && c.readyState === 1) {
+      try { c.send(data); } catch {}
+    }
+  }
+}
+
 // Make sure this week's content exists before we start serving, then check hourly.
 ensureWeek()
   .catch((e) => console.error("initial ensureWeek failed:", e.message))
   .finally(() => {
-    app.listen(PORT, () => console.log(`weekend app on :${PORT}`));
+    httpServer.listen(PORT, () => console.log(`weekend app on :${PORT}`));
     setInterval(() => ensureWeek().catch((e) => console.error("scheduled ensureWeek failed:", e.message)), 60 * 60 * 1000);
   });

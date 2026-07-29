@@ -225,3 +225,31 @@ button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
 /* Desire menu: completed item styling */
 .desire.done-item .t { opacity: 0.6; }
 .done-tag { font-size: 11px; color: var(--yes); font-weight: 700; margin-left: 4px; }
+
+/* ---- Draw canvas ---- */
+.canvas-wrap {
+  width: 100%; border-radius: 16px; overflow: hidden;
+  border: 1px solid var(--line); background: var(--ink);
+  touch-action: none; /* prevent scroll while drawing */
+}
+#canvas { display: block; width: 100%; touch-action: none; cursor: crosshair; }
+.tools { margin-top: 12px; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.swatch {
+  width: 34px; height: 34px; border-radius: 50%; padding: 0;
+  border: 2px solid transparent; box-shadow: 0 0 0 1px var(--line) inset;
+}
+.swatch.on { border-color: var(--text); transform: scale(1.08); }
+.tool-row { display: flex; align-items: center; gap: 8px; }
+.tool-row input[type=range] { flex: 1; accent-color: var(--rose); }
+.tool-btn.on { background: var(--rose); color: var(--ink); }
+#presence { color: var(--rose); }
+
+/* ---- Gallery ---- */
+.gallery-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gitem { position: relative; }
+.gitem img { width: 100%; border-radius: 12px; border: 1px solid var(--line); display: block; }
+.gdel {
+  position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0;
+  border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; font-size: 13px;
+}
