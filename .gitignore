@@ -1,0 +1,15 @@
+# Dependencies — reinstalled from package-lock.json, and better-sqlite3/sharp
+# ship compiled native binaries that must never be committed.
+node_modules/
+
+# Local database + uploaded photos. On Railway these live in the /data volume;
+# locally src/db.js falls back to this directory.
+data/
+
+# Secrets (passphrases, VAPID keys, API keys)
+.env
+.env.*
+
+npm-debug.log*
+*.log
+.DS_Store

@@ -99,6 +99,28 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
 
+  -- "Need you" pings. One button, three intensities (how long it was held),
+  -- and an answer from the other side so the sender knows it landed.
+  CREATE TABLE IF NOT EXISTS attention (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    level INTEGER NOT NULL,          -- 1 = hi, 2 = thinking of you, 3 = need you
+    created_at INTEGER NOT NULL,
+    pushed INTEGER NOT NULL DEFAULT 0,   -- did this one actually send a push?
+    nudged INTEGER NOT NULL DEFAULT 0,   -- has the one-time re-nudge fired?
+    ack_at INTEGER,
+    ack_text TEXT
+  );
+
+  -- Availability ("in a meeting til 3") so a ping is never sent into a void.
+  CREATE TABLE IF NOT EXISTS status (
+    person TEXT PRIMARY KEY,
+    text TEXT,
+    until INTEGER,                   -- expiry timestamp, or NULL for open-ended
+    updated_at INTEGER NOT NULL
+  );
+
   -- Saved AI date plans (shared — both can see)
   CREATE TABLE IF NOT EXISTS date_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
