@@ -5,6 +5,7 @@ A private app for two — for couples who only get the weekends together. Node/E
 ## What's inside
 
 - **Countdown** to your next weekend together (auto-set to the upcoming Saturday, or pin your own).
+- **The attention button** — hold it, don't tap it. A quick press says hi; hold for a second it's "thinking of you"; hold it down and it's "I need you." Whoever's on the other end can answer straight from the notification (*On my way* / *Give me 5* / ❤️), and the answer lands back on your screen so you know it got through. Either of you can set a status ("heads-down til 3") that shows on the button *before* it's pressed.
 - **Love notes (timed dead drop)** — leave a note now or set it to unlock later in the week. Your partner can't read it until it unlocks; you always see your own.
 - **Question & dare deck** — draw a card (AI-generated fresh on every draw, or from a built-in deck without a key). Answer with words, a photo, or both. Photos you send land privately in your partner's inbox.
 - **Inbox** — send each other photos and notes anytime. Private to the recipient: you see what you've sent and received; your partner only sees what was sent to them. Photos are resized and stripped of location metadata on upload, and served only to the two people on the message.
@@ -50,10 +51,16 @@ NAME_A=Blake NAME_B=Robin PASS_A=secret1 PASS_B=secret2 SESSION_SECRET=anything 
 
 ### Notifications
 
-The app can send push notifications — a "thinking of you" buzz, and a ping whenever one of you sends a note, photo, drawing, or points. Each person taps "Turn on" once to allow notifications on their device.
+The app can send push notifications — the attention button, and a ping whenever one of you sends a note, photo, drawing, or points. Each person taps "Turn on" once to allow notifications on their device.
 
-- **iPhone:** push only works *after* you Add the app to your Home Screen (install it as a PWA). It won't work in a Safari tab — that's an Apple limitation, not a bug.
-- **Android:** works in Chrome directly, though installing to the home screen is still recommended.
+- **iPhone:** push only works *after* you Add the app to your Home Screen (install it as a PWA). It won't work in a Safari tab — that's an Apple limitation, not a bug. iOS also doesn't render the reply buttons on a notification, so answering there means tapping the notification to open the app and replying from the toast — one extra tap.
+- **Android:** works in Chrome directly, though installing to the home screen is still recommended. Reply buttons show up right on the notification.
+
+Some deliberate restraint built into the attention button, so it stays sweet rather than becoming a demand:
+
+- Repeat presses always burst hearts on their screen, but the *push* is throttled to one a minute — a playful flurry won't machine-gun their phone.
+- An unanswered "I need you" sends one more gentle buzz after 15 minutes, then stops asking.
+- A status ("in a meeting til 3") is visible on the button before it's pressed, so a ping is never sent into a void.
 
 5. Railway sets `PORT` automatically. Deploy — you'll get a public URL.
 6. Open the URL on your phones and **Add to Home Screen** to install it as an app.

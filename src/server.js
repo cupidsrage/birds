@@ -48,12 +48,16 @@ try {
 }
 
 // Send a notification to everyone EXCEPT the actor (usually: notify the partner).
-async function notify(targetPerson, { title, body, url }) {
+// `tag` collapses repeats into one notification; `actions` adds reply buttons
+// (Android/desktop render these — iOS shows the notification without them).
+async function notify(targetPerson, { title, body, url, tag, actions, data, vibrate }) {
   if (!pushReady) return;
   const subs = db.prepare(`SELECT id, sub FROM push_subs WHERE person = ?`).all(targetPerson);
   for (const row of subs) {
     try {
-      await webpush.sendNotification(JSON.parse(row.sub), JSON.stringify({ title, body, url: url || "/" }));
+      await webpush.sendNotification(JSON.parse(row.sub), JSON.stringify({
+        title, body, url: url || "/", tag, actions, data, vibrate,
+      }));
     } catch (e) {
       // 404/410 mean the subscription is dead — clean it up.
       if (e.statusCode === 404 || e.statusCode === 410) {
@@ -308,12 +312,153 @@ app.get("/api/push/status", auth, (req, res) => {
   res.json({ subscribed: c > 0 });
 });
 
-// The "thinking of you" buzz — sends a gentle nudge to the partner.
+// ---------- Attention ("need you") ----------
+// One button, three intensities — how long you hold it decides which one goes.
+const ATTENTION_LEVELS = {
+  1: { title: (n) => `${n} says hi 👋`, body: "" },
+  2: { title: (n) => `${n} is thinking of you 💭`, body: "" },
+  3: { title: (n) => `${n} needs you 💗`, body: "Answer when you can?" },
+};
+// The three canned replies, sent straight from the notification.
+const ACK_REPLIES = {
+  coming: "On my way 💗",
+  soon: "Give me 5 💛",
+  heart: "❤️",
+};
+// An unanswered "need you" gets exactly one more gentle buzz, then stops asking.
+const RENUDGE_AFTER_MS = 15 * 60 * 1000;
+// Repeat taps still burst hearts on their screen every time; only the push is
+// throttled, so a playful flurry doesn't machine-gun their phone.
+const PUSH_THROTTLE_MS = 60 * 1000;
+
+function ackActions() {
+  return [
+    { action: "ack:coming", title: "On my way" },
+    { action: "ack:soon", title: "Give me 5" },
+    { action: "ack:heart", title: "❤️" },
+  ];
+}
+
+app.post("/api/attention", auth, async (req, res) => {
+  const level = Math.max(1, Math.min(3, parseInt(req.body?.level, 10) || 2));
+  const now = Date.now();
+  const info = db.prepare(`INSERT INTO attention (sender, recipient, level, created_at) VALUES (?,?,?,?)`)
+    .run(req.person, req.partner, level, now);
+  const id = info.lastInsertRowid;
+
+  // Live on their screen if the app is open right now.
+  sendEvent(req.partner, { t: "attention", id, from: req.person, level });
+
+  const lastPush = db.prepare(`SELECT MAX(created_at) AS t FROM attention WHERE sender = ? AND pushed = 1`)
+    .get(req.person).t;
+  const throttled = !!lastPush && now - lastPush < PUSH_THROTTLE_MS;
+  if (!throttled) {
+    db.prepare(`UPDATE attention SET pushed = 1 WHERE id = ?`).run(id);
+    const cfg = ATTENTION_LEVELS[level];
+    await notify(req.partner, {
+      title: cfg.title(req.person),
+      body: cfg.body,
+      url: "/",
+      tag: "attention",
+      vibrate: level === 3 ? [80, 40, 80, 40, 160] : [80, 40, 80],
+      data: { attentionId: id },
+      actions: ackActions(),
+    });
+  }
+  res.json({ ok: true, id, level, throttled });
+});
+
+// Answer a ping. Called from the app, or straight from the notification buttons.
+app.post("/api/attention/:id/ack", auth, async (req, res) => {
+  const row = db.prepare(`SELECT id, sender, recipient, ack_at FROM attention WHERE id = ?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Not found." });
+  if (row.recipient !== req.person) return res.status(403).json({ error: "Not yours to answer." });
+  const text = ACK_REPLIES[req.body?.reply] || ACK_REPLIES.heart;
+  // First answer wins, but a second tap still re-sends the reply rather than 400ing.
+  if (!row.ack_at) {
+    db.prepare(`UPDATE attention SET ack_at = ?, ack_text = ? WHERE id = ?`).run(Date.now(), text, row.id);
+  }
+  sendEvent(row.sender, { t: "attention-ack", id: row.id, from: req.person, text });
+  await notify(row.sender, { title: `${req.person}: ${text}`, body: "", url: "/", tag: "attention-ack" });
+  res.json({ ok: true, text });
+});
+
+// What the button should say: am I waiting on an answer, did one just land,
+// is my partner heads-down, and how often have we reached for each other lately.
+app.get("/api/attention", auth, (req, res) => {
+  // A casual "hi" isn't something you sit waiting on an answer for — only a
+  // deliberate hold (level 2+) puts the button into its waiting state.
+  const waiting = db.prepare(
+    `SELECT id, level, created_at FROM attention
+      WHERE sender = ? AND level >= 2 AND ack_at IS NULL AND created_at > ?
+      ORDER BY created_at DESC LIMIT 1`
+  ).get(req.person, Date.now() - 12 * 3600000);
+  const lastAck = db.prepare(
+    `SELECT id, ack_text, ack_at FROM attention
+      WHERE sender = ? AND ack_at IS NOT NULL ORDER BY ack_at DESC LIMIT 1`
+  ).get(req.person);
+  const week = db.prepare(`SELECT COUNT(*) AS c FROM attention WHERE created_at > ?`)
+    .get(Date.now() - 7 * 86400000).c;
+  res.json({
+    waiting: waiting || null,
+    lastAck: lastAck || null,
+    week,
+    partnerStatus: readStatus(req.partner),
+    myStatus: readStatus(req.person),
+  });
+});
+
+// ---------- Availability status ----------
+function readStatus(person) {
+  const row = db.prepare(`SELECT text, until FROM status WHERE person = ?`).get(person);
+  if (!row || !row.text) return { text: null, until: null };
+  if (row.until && row.until < Date.now()) return { text: null, until: null }; // lapsed
+  return { text: row.text, until: row.until };
+}
+
+app.post("/api/status", auth, (req, res) => {
+  const text = String(req.body?.text || "").trim().slice(0, 60);
+  const hours = parseFloat(req.body?.hours);
+  const until = text && Number.isFinite(hours) && hours > 0 ? Date.now() + hours * 3600000 : null;
+  db.prepare(`INSERT INTO status (person, text, until, updated_at) VALUES (?,?,?,?)
+              ON CONFLICT(person) DO UPDATE SET text = excluded.text, until = excluded.until, updated_at = excluded.updated_at`)
+    .run(req.person, text || null, until, Date.now());
+  const now = readStatus(req.person);
+  sendEvent(req.partner, { t: "status", from: req.person, ...now });
+  res.json({ ok: true, ...now });
+});
+
+// A "need you" nobody answered gets one more buzz after a while, then rests.
+// The lower bound keeps a restart from re-nudging pings from days ago.
+async function renudge() {
+  const cutoff = Date.now() - RENUDGE_AFTER_MS;
+  const rows = db.prepare(
+    `SELECT id, sender, recipient FROM attention
+      WHERE level = 3 AND ack_at IS NULL AND nudged = 0
+        AND created_at < ? AND created_at > ?`
+  ).all(cutoff, cutoff - 6 * 3600000);
+  for (const r of rows) {
+    db.prepare(`UPDATE attention SET nudged = 1 WHERE id = ?`).run(r.id);
+    await notify(r.recipient, {
+      title: `${r.sender} is still waiting 💗`,
+      body: "", url: "/", tag: "attention",
+      data: { attentionId: r.id },
+      actions: ackActions(),
+    });
+  }
+}
+setInterval(() => renudge().catch((e) => console.error("renudge failed:", e.message)), 60 * 1000);
+
+// Kept for older cached clients — the old buzz is now a level-2 ping.
 app.post("/api/buzz", auth, async (req, res) => {
-  // Live heart-burst on the partner's screen if their app is open right now.
-  sendEvent(req.partner, { t: "buzz", from: req.person });
-  // And a push notification if they're not looking.
-  await notify(req.partner, { title: `${req.person} is thinking of you 💭`, body: "", url: "/" });
+  const now = Date.now();
+  const info = db.prepare(`INSERT INTO attention (sender, recipient, level, created_at, pushed) VALUES (?,?,2,?,1)`)
+    .run(req.person, req.partner, now);
+  sendEvent(req.partner, { t: "attention", id: info.lastInsertRowid, from: req.person, level: 2 });
+  await notify(req.partner, {
+    title: `${req.person} is thinking of you 💭`, body: "", url: "/", tag: "attention",
+    data: { attentionId: info.lastInsertRowid }, actions: ackActions(),
+  });
   res.json({ ok: true });
 });
 

@@ -84,7 +84,7 @@ async function boot() {
   }, 30000);
 }
 
-// Always-on socket for live app events (currently: buzz bursts). Auto-reconnects.
+// Always-on socket for live app events (attention pings, answers, status).
 let eventsSock = null;
 function connectEvents() {
   try {
@@ -92,11 +92,23 @@ function connectEvents() {
     eventsSock = new WebSocket(`${proto}://${location.host}/ws/events`);
     eventsSock.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.t === "buzz") {
-        // She opened / has the app open — shower her screen with hearts.
-        if (window.FX) FX.burst({ count: 40, kind: "heart" });
-        if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
-        showBuzzToast(msg.from);
+      // "buzz" is the old event name — treat it as a level-2 ping.
+      if (msg.t === "attention" || msg.t === "buzz") {
+        const level = msg.level || 2;
+        // Their app is open — shower the screen, harder the more she held it.
+        if (window.FX) FX.burst({ count: level === 3 ? 60 : level === 2 ? 40 : 20, kind: "heart" });
+        if (navigator.vibrate) navigator.vibrate(level === 3 ? [60, 40, 60, 40, 140] : [60, 40, 60]);
+        showAttentionToast({ from: msg.from, level, id: msg.id });
+      } else if (msg.t === "attention-ack") {
+        // The answer landing is the whole point — make it visible.
+        attn.lastAck = { ack_text: msg.text, ack_at: Date.now() };
+        attn.waiting = null;
+        renderAttnMeta();
+        if (window.FX) FX.burst({ count: 24 });
+        if (navigator.vibrate) navigator.vibrate(40);
+      } else if (msg.t === "status") {
+        attn.partnerStatus = { text: msg.text, until: msg.until };
+        renderAttnMeta();
       }
     };
     // Reconnect if the socket drops (backgrounded, network blip, redeploy).
@@ -105,17 +117,190 @@ function connectEvents() {
   } catch {}
 }
 
-function showBuzzToast(from) {
+// Incoming ping. Carries reply buttons so it can be answered without leaving
+// whatever tab you're on.
+function showAttentionToast({ from, level, id }) {
   let el = document.getElementById("buzz-toast");
   if (!el) {
     el = document.createElement("div");
     el.id = "buzz-toast";
     document.body.appendChild(el);
   }
-  el.textContent = `💗 ${from} is thinking of you`;
+  const label = level === 3 ? `💗 ${from} needs you`
+    : level === 1 ? `👋 ${from} says hi`
+    : `💭 ${from} is thinking of you`;
+  el.innerHTML = `<div class="bt-txt">${h(label)}</div>` + (id ? `
+    <div class="bt-acks">
+      <button class="small" data-reply="coming">On my way</button>
+      <button class="small ghost" data-reply="soon">Give me 5</button>
+      <button class="small ghost" data-reply="heart">❤️</button>
+    </div>` : "");
+  el.classList.toggle("has-acks", !!id);
   el.classList.add("show");
+  el.querySelectorAll("[data-reply]").forEach((b) => {
+    b.onclick = async () => {
+      el.querySelector(".bt-acks").innerHTML = `<span class="bt-sent">Sent 💗</span>`;
+      try { await api.post(`/api/attention/${id}/ack`, { reply: b.dataset.reply }); } catch {}
+      clearTimeout(el._t);
+      el._t = setTimeout(() => el.classList.remove("show"), 1400);
+    };
+  });
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove("show"), 3500);
+  // Leave it up long enough to actually be answered.
+  el._t = setTimeout(() => el.classList.remove("show"), id ? 14000 : 3500);
+}
+
+/* ---------------- The attention button ---------------- */
+// Hold, don't tap — how long you hold picks the intensity. And the answer comes
+// back to you, so a ping is never sent into silence.
+const HOLD_STEPS = [
+  { at: 0, level: 1, label: "👋 Say hi" },
+  { at: 900, level: 2, label: "💭 Thinking of you" },
+  { at: 2200, level: 3, label: "💗 I need you" },
+];
+const HOLD_FULL_MS = 3000; // the fill bar tops out here
+const attn = { waiting: null, lastAck: null, partnerStatus: null, myStatus: null, week: 0 };
+
+const restLabel = () => `💗 Hold for ${me.partner}`;
+const levelFor = (ms) => HOLD_STEPS.reduce((l, s) => (ms >= s.at ? s.level : l), 1);
+const stepLabel = (level) => HOLD_STEPS.find((s) => s.level === level).label;
+
+function wireAttention() {
+  const btn = document.getElementById("attn");
+  if (!btn) return;
+  const fill = btn.querySelector(".attn-fill");
+  const txt = btn.querySelector(".attn-txt");
+  let startedAt = 0, raf = 0, shown = 0, held = false;
+
+  function tick() {
+    const ms = Date.now() - startedAt;
+    fill.style.width = Math.min(100, (ms / HOLD_FULL_MS) * 100) + "%";
+    const l = levelFor(ms);
+    if (l !== shown) {
+      shown = l;
+      txt.textContent = stepLabel(l);
+      btn.dataset.level = l;
+      if (navigator.vibrate) navigator.vibrate(l === 3 ? [25, 30, 25] : 20); // a tick per step up
+    }
+    raf = requestAnimationFrame(tick);
+  }
+
+  function release(send) {
+    if (!held) return;
+    held = false;
+    cancelAnimationFrame(raf);
+    const level = levelFor(Date.now() - startedAt);
+    btn.classList.remove("holding");
+    fill.style.width = "0%";
+    delete btn.dataset.level;
+    shown = 0;
+    if (send) sendAttention(btn, txt, level);
+    else txt.textContent = restLabel();
+  }
+
+  btn.addEventListener("pointerdown", (e) => {
+    if (btn.disabled || held) return;
+    // Capture the pointer so sliding a thumb off the button doesn't drop the hold.
+    try { btn.setPointerCapture(e.pointerId); } catch {}
+    held = true; startedAt = Date.now(); shown = 0;
+    btn.classList.add("holding");
+    tick();
+  });
+  btn.addEventListener("pointerup", () => release(true));
+  btn.addEventListener("pointercancel", () => release(false));
+  btn.addEventListener("contextmenu", (e) => e.preventDefault()); // long-press menu
+
+  wireStatusForm();
+  refreshAttention();
+}
+
+async function sendAttention(btn, txt, level) {
+  btn.disabled = true;
+  const r = btn.getBoundingClientRect();
+  if (window.FX) FX.burst({
+    x: r.left + r.width / 2, y: r.top + r.height / 2,
+    count: level === 3 ? 46 : level === 2 ? 30 : 16,
+    kind: level === 1 ? "mixed" : "heart",
+  });
+  if (navigator.vibrate) navigator.vibrate(level === 3 ? [60, 40, 60, 40, 60] : 60);
+  try {
+    const sent = await api.post("/api/attention", { level });
+    txt.textContent = "Sent 💗";
+    attn.lastAck = null;
+    if (level >= 2) attn.waiting = { id: sent.id, level, created_at: Date.now() };
+    renderAttnMeta();
+  } catch {
+    txt.textContent = "Couldn't send";
+  }
+  setTimeout(() => { txt.textContent = restLabel(); btn.disabled = false; }, 1600);
+}
+
+function untilLabel(until) {
+  if (!until) return "";
+  const d = new Date(until);
+  const hh = d.getHours() % 12 || 12;
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return ` til ${hh}:${mm}${d.getHours() < 12 ? "am" : "pm"}`;
+}
+
+// One line under the button. Priority: a fresh answer, then waiting, then
+// whether they're heads-down, then how often you've reached for each other.
+function renderAttnMeta() {
+  const el = document.getElementById("attnmeta");
+  if (!el || !me) return;
+  const fresh = attn.lastAck && Date.now() - attn.lastAck.ack_at < 90000;
+  let main, cls = "";
+  if (fresh) {
+    main = `${me.partner}: ${attn.lastAck.ack_text}`; cls = "ok";
+  } else if (attn.waiting) {
+    main = `waiting for ${me.partner}…`; cls = "waiting";
+  } else if (attn.partnerStatus && attn.partnerStatus.text) {
+    main = `${me.partner} is ${attn.partnerStatus.text}${untilLabel(attn.partnerStatus.until)}`; cls = "busy";
+  } else if (attn.week > 0) {
+    main = `reached for each other ${attn.week}× this week`;
+  } else {
+    main = "hold longer for “I need you”";
+  }
+  const mine = attn.myStatus && attn.myStatus.text;
+  el.className = `attn-meta ${cls}`;
+  el.innerHTML = `<span>${h(main)}</span><button class="attn-set" id="attnset">${mine ? "Change yours" : "Set yours"}</button>`;
+  document.getElementById("attnset").onclick = () => {
+    const f = document.getElementById("attnform");
+    f.hidden = !f.hidden;
+    if (!f.hidden) {
+      const i = document.getElementById("stext");
+      i.value = mine || "";
+      i.focus();
+    }
+  };
+}
+
+function wireStatusForm() {
+  const form = document.getElementById("attnform");
+  if (!form) return;
+  const save = async (text, hours) => {
+    try {
+      const s = await api.post("/api/status", { text, hours });
+      attn.myStatus = { text: s.text, until: s.until };
+    } catch {}
+    form.hidden = true;
+    renderAttnMeta();
+  };
+  document.getElementById("ssave").onclick = () =>
+    save(document.getElementById("stext").value, parseFloat(document.getElementById("shours").value));
+  document.getElementById("sclear").onclick = () => save("", 0);
+}
+
+async function refreshAttention() {
+  try {
+    const a = await api.get("/api/attention");
+    attn.waiting = a.waiting;
+    attn.lastAck = a.lastAck;
+    attn.week = a.week;
+    attn.partnerStatus = a.partnerStatus;
+    attn.myStatus = a.myStatus;
+  } catch {}
+  renderAttnMeta();
 }
 
 /* ---------------- Login ---------------- */
@@ -166,7 +351,26 @@ function renderApp() {
           <div class="big">${t.big}</div>
           <div class="lbl">${t.lbl}</div>
         </div>
-        <button class="buzz" id="buzz">💭 Thinking of you</button>
+        <div class="attn-wrap">
+          <button class="attn" id="attn">
+            <span class="attn-fill"></span>
+            <span class="attn-txt">💗 Hold for ${h(me.partner)}</span>
+          </button>
+          <div class="attn-meta" id="attnmeta"></div>
+          <div class="attn-form" id="attnform" hidden>
+            <input id="stext" maxlength="60" placeholder="heads-down til 3…" />
+            <div class="row">
+              <select id="shours">
+                <option value="1">for 1 hour</option>
+                <option value="3" selected>for 3 hours</option>
+                <option value="8">for 8 hours</option>
+                <option value="0">until I clear it</option>
+              </select>
+              <button class="small" id="ssave">Save</button>
+              <button class="small ghost" id="sclear">Clear</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div id="pushbanner"></div>
       <div class="tabs">
@@ -176,21 +380,7 @@ function renderApp() {
     </div>`;
   document.getElementById("logout").onclick = async () => { await api.post("/api/logout"); location.reload(); };
   document.querySelectorAll(".tab").forEach((b) => b.onclick = () => { tab = b.dataset.tab; renderApp(); });
-  document.getElementById("buzz").onclick = async (e) => {
-    const btn = e.currentTarget;
-    const rect = btn.getBoundingClientRect();
-    if (window.FX) FX.burst({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, count: 30 });
-    btn.disabled = true;
-    const original = btn.textContent;
-    try {
-      await api.post("/api/buzz");
-      if (navigator.vibrate) navigator.vibrate(60);
-      btn.textContent = "💗 Sent!";
-    } catch {
-      btn.textContent = "Couldn't send";
-    }
-    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1800);
-  };
+  wireAttention();
   refreshBadge();
   maybeShowPushBanner();
   renderPanel();
