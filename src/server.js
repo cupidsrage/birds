@@ -374,10 +374,9 @@ app.post("/api/attention/:id/ack", auth, async (req, res) => {
   if (!row) return res.status(404).json({ error: "Not found." });
   if (row.recipient !== req.person) return res.status(403).json({ error: "Not yours to answer." });
   const text = ACK_REPLIES[req.body?.reply] || ACK_REPLIES.heart;
-  // First answer wins, but a second tap still re-sends the reply rather than 400ing.
-  if (!row.ack_at) {
-    db.prepare(`UPDATE attention SET ack_at = ?, ack_text = ? WHERE id = ?`).run(Date.now(), text, row.id);
-  }
+  // Last answer wins. A mis-tap sends the wrong thing to a real person, so
+  // "Change" has to actually correct the record, not just send a second message.
+  db.prepare(`UPDATE attention SET ack_at = ?, ack_text = ? WHERE id = ?`).run(Date.now(), text, row.id);
   sendEvent(row.sender, { t: "attention-ack", id: row.id, from: req.person, text });
   await notify(row.sender, { title: `${req.person}: ${text}`, body: "", url: "/", tag: "attention-ack" });
   res.json({ ok: true, text });

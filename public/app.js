@@ -137,17 +137,36 @@ function showAttentionToast({ from, level, id }) {
     </div>` : "");
   el.classList.toggle("has-acks", !!id);
   el.classList.add("show");
-  el.querySelectorAll("[data-reply]").forEach((b) => {
-    b.onclick = async () => {
-      el.querySelector(".bt-acks").innerHTML = `<span class="bt-sent">Sent 💗</span>`;
-      try { await api.post(`/api/attention/${id}/ack`, { reply: b.dataset.reply }); } catch {}
-      clearTimeout(el._t);
-      el._t = setTimeout(() => el.classList.remove("show"), 1400);
-    };
-  });
+  if (id) wireReplies(el, id);
   clearTimeout(el._t);
   // Leave it up long enough to actually be answered.
   el._t = setTimeout(() => el.classList.remove("show"), id ? 14000 : 3500);
+}
+
+const REPLY_TEXT = { coming: "On my way 💗", soon: "Give me 5 💛", heart: "❤️" };
+
+function wireReplies(el, id) {
+  el.querySelectorAll("[data-reply]").forEach((b) => {
+    b.onclick = async () => {
+      const reply = b.dataset.reply;
+      // Show what was sent, not just "sent" — so a wrong tap is obvious at a
+      // glance, with a way to correct it before the toast goes away.
+      el.querySelector(".bt-acks").innerHTML =
+        `<div class="bt-sent"><span class="bt-what">Sent “${h(REPLY_TEXT[reply] || "")}”</span><button class="bt-undo" id="bt-undo">Change</button></div>`;
+      el.querySelector("#bt-undo").onclick = () => {
+        el.querySelector(".bt-acks").innerHTML = `
+          <button class="small" data-reply="coming">On my way</button>
+          <button class="small ghost" data-reply="soon">Give me 5</button>
+          <button class="small ghost" data-reply="heart">❤️</button>`;
+        wireReplies(el, id);
+        clearTimeout(el._t);
+        el._t = setTimeout(() => el.classList.remove("show"), 14000);
+      };
+      try { await api.post(`/api/attention/${id}/ack`, { reply }); } catch {}
+      clearTimeout(el._t);
+      el._t = setTimeout(() => el.classList.remove("show"), 6000);
+    };
+  });
 }
 
 /* ---------------- The attention button ---------------- */

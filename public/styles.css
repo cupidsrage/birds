@@ -369,9 +369,13 @@ button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
 
 /* ---- Toast for an incoming ping (with reply buttons) ---- */
 #buzz-toast {
-  position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom));
+  /* Held well clear of the bottom edge — taps down there are the least
+     accurate on a phone, and this toast has buttons worth hitting. */
+  position: fixed; left: 50%; bottom: calc(64px + env(safe-area-inset-bottom));
   transform: translate(-50%, 20px); z-index: 5;
-  max-width: min(360px, calc(100vw - 32px)); text-align: center;
+  /* A set width, not just a max — shrink-wrapping to content made the title
+     wrap and squeezed the reply buttons into a narrow column. */
+  width: min(340px, calc(100vw - 32px)); text-align: center;
   background: var(--card); border: 1px solid var(--rose-deep);
   color: var(--text); padding: 12px 20px; border-radius: 24px;
   box-shadow: var(--shadow); font-weight: 600; font-size: 15px;
@@ -380,11 +384,26 @@ button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
 #buzz-toast.show { opacity: 1; transform: translate(-50%, 0); }
 /* Only grab taps when there's something to tap. */
 #buzz-toast.has-acks.show { pointer-events: auto; }
-/* All three replies stay on one line — a wrapped row reads as clutter. */
+/* Stacked, full-width, finger-sized. These were a tight one-line row and the
+   6px gap between 40px buttons was close enough to mis-tap — which sends the
+   wrong message to a real person. Roomy targets matter more than a tidy row. */
 #buzz-toast .bt-acks {
-  display: flex; gap: 6px; justify-content: center; margin-top: 10px;
+  display: flex; flex-direction: column; gap: 8px; margin-top: 12px;
 }
-#buzz-toast .bt-acks button { padding: 7px 10px; font-size: 12px; white-space: nowrap; }
+/* Scoped to the reply buttons only — the Change button below sizes itself. */
+#buzz-toast .bt-acks button[data-reply] {
+  width: 100%; min-height: 48px; padding: 13px 16px; font-size: 15px;
+}
+#buzz-toast .bt-sent {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-size: 14px; color: var(--yes); min-height: 48px;
+}
+#buzz-toast .bt-sent .bt-what { flex: 1; min-width: 0; }
+#buzz-toast .bt-undo { flex: 0 0 auto; }
+#buzz-toast .bt-undo {
+  background: none; border: 1px solid var(--line); color: var(--muted);
+  padding: 8px 14px; font-size: 13px; border-radius: 12px; min-height: 36px;
+}
 #buzz-toast .bt-sent { font-size: 13px; color: var(--yes); }
 
 /* ---- Deck heat dial ---- */
